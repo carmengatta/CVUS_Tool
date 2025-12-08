@@ -3,9 +3,9 @@ import pandas as pd
 import os
 
 # ==========================================================
-# SIMPLE PASSWORD PROTECTION (FIXED)
+# SIMPLE PASSWORD PROTECTION (Streamlit v1.25+ compatible)
 # ==========================================================
-PASSWORD = "CVUSTool"  # <<< CHANGE FOR DEPLOYMENT
+PASSWORD = "CVUSTool"  # CHANGE FOR DEPLOYMENT
 
 def password_gate():
     st.title("🔐 Secure Access")
@@ -14,18 +14,19 @@ def password_gate():
     if pw == PASSWORD:
         st.session_state["authenticated"] = True
         st.success("Access granted!")
-        st.experimental_rerun()   # <<< THIS LINE FIXES YOUR ISSUE
+        st.rerun()  # <<< FIX: modern rerun function
     elif pw != "":
         st.error("Incorrect password")
 
-# Initialize state if missing
+# Initialize session state
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# Stop app unless authenticated
+# Block access until logged in
 if not st.session_state["authenticated"]:
     password_gate()
     st.stop()
+
 
 # ==========================================================
 # MAIN APP STARTS HERE
