@@ -4,7 +4,7 @@ import pandas as pd
 # ==========================================================
 # SIMPLE PASSWORD PROTECTION
 # ==========================================================
-PASSWORD = "your_password_here"  # <<< CHANGE THIS BEFORE DEPLOYMENT
+PASSWORD = "CVUSTool"  # <<< CHANGE THIS BEFORE DEPLOYMENT
 
 def password_gate():
     st.title("🔐 Secure Access")
