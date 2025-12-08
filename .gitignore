@@ -1,0 +1,27 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Raw input data
+data_raw/
+*.csv
+*.txt
+*.xlsx
+
+# Allow parquet outputs
+!data_output/*.parquet
+
+# Ignore output CSVs
+data_output/*.csv
+
+# Streamlit config
+.streamlit/
+
+# System files
+.DS_Store
+Thumbs.db
