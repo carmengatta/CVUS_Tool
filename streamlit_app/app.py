@@ -33,11 +33,12 @@ st.write("Built from Form 5500 + Schedule SB filings")
 # ----------------------------------------------------------
 @st.cache_data
 def load_master():
-    return pd.read_parquet("data/master_db_latest.parquet")
+    return pd.read_parquet("data_output/master_db_latest.parquet")
 
 @st.cache_data
 def load_sponsor_rollup():
-    return pd.read_parquet("data/sponsor_rollup_latest.parquet")
+    return pd.read_parquet("data_output/sponsor_rollup_latest.parquet")
+
 
 master = load_master()
 sponsor = load_sponsor_rollup()
