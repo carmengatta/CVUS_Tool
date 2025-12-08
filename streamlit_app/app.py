@@ -3,23 +3,26 @@ import pandas as pd
 import os
 
 # ==========================================================
-# SIMPLE PASSWORD PROTECTION
+# SIMPLE PASSWORD PROTECTION (FIXED)
 # ==========================================================
-PASSWORD = "CVUSTool"  
+PASSWORD = "CVUSTool"  # <<< CHANGE FOR DEPLOYMENT
 
 def password_gate():
     st.title("🔐 Secure Access")
     pw = st.text_input("Enter password:", type="password")
+
     if pw == PASSWORD:
         st.session_state["authenticated"] = True
+        st.success("Access granted!")
+        st.experimental_rerun()   # <<< THIS LINE FIXES YOUR ISSUE
     elif pw != "":
         st.error("Incorrect password")
 
-# Initialize auth state
+# Initialize state if missing
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# Require password
+# Stop app unless authenticated
 if not st.session_state["authenticated"]:
     password_gate()
     st.stop()
