@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
+import os
 
 # ==========================================================
 # SIMPLE PASSWORD PROTECTION
 # ==========================================================
-PASSWORD = "CVUSTool"  # <<< CHANGE THIS BEFORE DEPLOYMENT
+PASSWORD = "CVUSTool"  
 
 def password_gate():
     st.title("🔐 Secure Access")
@@ -14,9 +15,11 @@ def password_gate():
     elif pw != "":
         st.error("Incorrect password")
 
+# Initialize auth state
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+# Require password
 if not st.session_state["authenticated"]:
     password_gate()
     st.stop()
@@ -29,17 +32,26 @@ st.title("📊 US Private-Sector DB Plan Analytics Dashboard")
 st.write("Built from Form 5500 + Schedule SB filings")
 
 # ----------------------------------------------------------
-# LOAD DATA
+# LOAD DATA HELPERS
 # ----------------------------------------------------------
+MASTER_PATH = "data_output/master_db_latest.parquet"
+SPONSOR_PATH = "data_output/sponsor_rollup_latest.parquet"
+
 @st.cache_data
 def load_master():
-    return pd.read_parquet("data_output/master_db_latest.parquet")
+    if not os.path.exists(MASTER_PATH):
+        st.error(f"Missing required dataset: `{MASTER_PATH}`")
+        st.stop()
+    return pd.read_parquet(MASTER_PATH)
 
 @st.cache_data
 def load_sponsor_rollup():
-    return pd.read_parquet("data_output/sponsor_rollup_latest.parquet")
+    if not os.path.exists(SPONSOR_PATH):
+        st.error(f"Missing required dataset: `{SPONSOR_PATH}`")
+        st.stop()
+    return pd.read_parquet(SPONSOR_PATH)
 
-
+# Load data
 master = load_master()
 sponsor = load_sponsor_rollup()
 
@@ -83,7 +95,9 @@ st.header("🏢 Sponsor-Level Profiles")
 
 search_ein = st.text_input("Search EIN:")
 if search_ein:
-    sponsor_filtered = sponsor[sponsor["ein"].astype(str).str.contains(search_ein)]
+    sponsor_filtered = sponsor[
+        sponsor["ein"].astype(str).str.contains(search_ein)
+    ]
     st.dataframe(sponsor_filtered, use_container_width=True)
 else:
     st.dataframe(
