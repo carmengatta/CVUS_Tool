@@ -90,10 +90,13 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
                     return col.apply(parse_float)
         return pd.Series([None]*len(df), index=df.index)
 
-    # EIN: always string, strip whitespace (but PLAN_NUMBER is passed through)
+    # EIN: always string, strip whitespace
     out['EIN'] = get_col(FIELD_MAP['EIN'], 'str').str.replace(r'\s+', '', regex=True)
-    # Pass through PLAN_NUMBER as already normalized
-    out['PLAN_NUMBER'] = df['PLAN_NUMBER'] if 'PLAN_NUMBER' in df.columns else pd.NA
+    # PLAN_NUMBER: always string, zero-padded to 3, strict
+    if 'PLAN_NUMBER' in df.columns:
+        out['PLAN_NUMBER'] = df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+    else:
+        out['PLAN_NUMBER'] = pd.NA
 
     # PLAN_YEAR: use argument if provided, else try to extract
     if plan_year is not None:
@@ -103,7 +106,7 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
 
     # ACK_ID: synthesize if missing
     if 'ACK_ID' not in df.columns and all(x in df.columns for x in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR']):
-        df['ACK_ID'] = df['EIN'].astype(str) + '-' + df['PLAN_NUMBER'].astype(str) + '-' + df['PLAN_YEAR'].astype(str)
+        df['ACK_ID'] = df['EIN'].astype(str).str.strip() + '-' + df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3) + '-' + str(plan_year if plan_year is not None else '')
 
     # PARTICIPANT COUNTS
     out['ACTIVE_COUNT'] = get_col(FIELD_MAP['ACTIVE_COUNT'], 'int')

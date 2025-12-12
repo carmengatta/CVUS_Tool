@@ -54,7 +54,15 @@ def normalize_sr_fields(df: pd.DataFrame) -> pd.DataFrame:
         logging.warning("No recognizable plan number field found in SR; dropping rows.")
         return pd.DataFrame(index=df.index)  # Drop all rows if PLAN_NUMBER missing
 
+    # EIN strict normalization
+    if 'EIN' in df.columns:
+        df['EIN'] = df['EIN'].astype(str).str.strip()
+
+    # PLAN_YEAR strict normalization
+    if 'PLAN_YEAR' in df.columns:
+        df['PLAN_YEAR'] = pd.to_numeric(df['PLAN_YEAR'], errors='coerce')
+
     # Synthesize ACK_ID if missing
     if 'ACK_ID' not in df.columns and all(x in df.columns for x in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR']):
-        df['ACK_ID'] = df['EIN'].astype(str) + '-' + df['PLAN_NUMBER'].astype(str) + '-' + df['PLAN_YEAR'].astype(str)
+        df['ACK_ID'] = df['EIN'].astype(str).str.strip() + '-' + df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3) + '-' + df['PLAN_YEAR'].astype(str)
     return df

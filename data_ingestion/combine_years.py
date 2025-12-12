@@ -116,38 +116,54 @@ def combine_years(
         sb_path    = os.path.join(data_dir, f"F_SCH_SB_{year}_latest.csv")
         sr_path    = os.path.join(data_dir, f"F_SCH_R_{year}_latest.csv")
 
-        # ----------------------------
-        # Load data
-        # ----------------------------
-        df_5500 = load_5500(f5500_path) if load_5500 and os.path.exists(f5500_path) else None
-        df_sb   = load_sb(sb_path)      if load_sb   and os.path.exists(sb_path)   else None
-        df_sr   = load_sr(sr_path)      if load_sr   and os.path.exists(sr_path)   else None
-
-        # ----------------------------
-        # Normalize SB
-        # ----------------------------
-        if df_sb is not None and normalize_sb:
+        # Load SB and normalize
+        df_sb = load_sb(sb_path) if load_sb and os.path.exists(sb_path) else None
+        if df_sb is None or df_sb.empty:
+            logging.warning(f"No Schedule SB data for {year}; skipping year.")
+            continue
+        if normalize_sb:
             df_sb = normalize_sb(df_sb, plan_year=year)
+        df_sb['EIN'] = df_sb['EIN'].astype(str).str.strip()
+        df_sb['PLAN_NUMBER'] = df_sb['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+        df_sb['PLAN_YEAR'] = year
+        df_sb['SB_KEY'] = df_sb['EIN'] + '-' + df_sb['PLAN_NUMBER'] + '-' + df_sb['PLAN_YEAR'].astype(str)
 
-        # ----------------------------
-        # Merge 5500 + SB + SR
-        # ----------------------------
-        if merge_func:
-            merged = merge_func(df_5500, df_sb, df_sr)
+        # Load and filter 5500
+        df_5500 = load_5500(f5500_path) if load_5500 and os.path.exists(f5500_path) else None
+        if df_5500 is not None and not df_5500.empty:
+            df_5500['EIN'] = df_5500['EIN'].astype(str).str.strip()
+            df_5500['PLAN_NUMBER'] = df_5500['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+            df_5500['PLAN_YEAR'] = year
+            df_5500['SB_KEY'] = df_5500['EIN'] + '-' + df_5500['PLAN_NUMBER'] + '-' + df_5500['PLAN_YEAR'].astype(str)
+            df_5500 = df_5500[df_5500['SB_KEY'].isin(df_sb['SB_KEY'])]
         else:
-            merged = df_5500  # fallback if merge missing (should not happen)
+            df_5500 = pd.DataFrame(columns=df_sb.columns)
 
-        # ----------------------------
-        # Save yearly output
-        # ----------------------------
+        # Load and filter SR
+        df_sr = load_sr(sr_path) if load_sr and os.path.exists(sr_path) else None
+        if df_sr is not None and not df_sr.empty:
+            df_sr['EIN'] = df_sr['EIN'].astype(str).str.strip()
+            df_sr['PLAN_NUMBER'] = df_sr['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+            df_sr['PLAN_YEAR'] = year
+            df_sr['SB_KEY'] = df_sr['EIN'] + '-' + df_sr['PLAN_NUMBER'] + '-' + df_sr['PLAN_YEAR'].astype(str)
+            df_sr = df_sr[df_sr['SB_KEY'].isin(df_sb['SB_KEY'])]
+        else:
+            df_sr = pd.DataFrame(columns=df_sb.columns)
+
+        # Use SB as base, left-merge 5500 and SR onto SB
+        merged = df_sb.copy()
+        if not df_5500.empty:
+            merged = pd.merge(merged, df_5500, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_5500'))
+        if not df_sr.empty:
+            merged = pd.merge(merged, df_sr, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_SR'))
+
+        merged['TRACKING_ID'] = merged['EIN'] + '-' + merged['PLAN_NUMBER']
+        merged['PLAN_YEAR'] = year
+
         out_path = os.path.join(output_dir, f"merged_{year}.parquet")
-
-        if merged is not None:
-            merged.to_parquet(out_path, index=False)
-            logging.info(f"Wrote {out_path}")
-            results.append((year, merged))
-        else:
-            logging.warning(f"No merged data for year {year}")
+        merged.to_parquet(out_path, index=False)
+        logging.info(f"Wrote {out_path}")
+        results.append((year, merged))
 
     return results
 

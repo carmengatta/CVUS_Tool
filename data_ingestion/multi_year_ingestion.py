@@ -23,36 +23,60 @@ def load_multi_year_data():
             sb_path = os.path.join(DATA_RAW, f"F_SCH_SB_{year}_latest.csv")
             sr_path = os.path.join(DATA_RAW, f"F_SCH_R_{year}_latest.csv")
 
-            f5500_df = load_5500_csv(f5500_path) if os.path.exists(f5500_path) else pd.DataFrame()
             sb_df = load_sb_csv(sb_path) if os.path.exists(sb_path) else pd.DataFrame()
-            sr_df = load_sr_csv(sr_path) if os.path.exists(sr_path) else pd.DataFrame()
+            if sb_df.empty:
+                logging.warning(f"No Schedule SB data for {year}; skipping year.")
+                continue
+            sb_df = normalize_sb_fields(sb_df, plan_year=year)
+            # Create unique key for SB
+            sb_df['EIN'] = sb_df['EIN'].astype(str).str.strip()
+            sb_df['PLAN_NUMBER'] = sb_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+            sb_df['PLAN_YEAR'] = year
+            sb_df['SB_KEY'] = sb_df['EIN'] + '-' + sb_df['PLAN_NUMBER'] + '-' + sb_df['PLAN_YEAR'].astype(str)
 
+            # Load and filter 5500
+            f5500_df = load_5500_csv(f5500_path) if os.path.exists(f5500_path) else pd.DataFrame()
             if not f5500_df.empty:
-                if not sb_df.empty:
-                    sb_df = normalize_sb_fields(sb_df)
-                if not sr_df.empty:
-                    if HAS_SR:
-                        sr_df = normalize_sr_fields(sr_df)
-                    else:
-                        logging.warning(f"normalize_sr_fields not available for {year}; skipping normalization for Schedule R.")
-                # Merge 5500 + SB
-                merged = merge_sb_5500(f5500_df, sb_df) if not sb_df.empty else f5500_df.copy()
-                # Merge R (left join on ACK_ID if present, else EIN+PLAN_NUMBER+PLAN_YEAR)
-                if not sr_df.empty:
-                    if 'ACK_ID' in merged.columns and 'ACK_ID' in sr_df.columns:
-                        merged = pd.merge(merged, sr_df, on='ACK_ID', how='left', suffixes=('', '_SR'))
-                    elif {'EIN', 'PLAN_NUMBER', 'PLAN_YEAR'}.issubset(merged.columns) and {'EIN', 'PLAN_NUMBER', 'PLAN_YEAR'}.issubset(sr_df.columns):
-                        merged = pd.merge(merged, sr_df, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_SR'))
-                    else:
-                        logging.warning(f"Could not merge Schedule R for {year}: missing merge keys.")
-                merged['PLAN_YEAR'] = year
-                if 'EIN' in merged.columns and 'PLAN_NUMBER' in merged.columns:
-                    merged['TRACKING_ID'] = merged['EIN'].astype(str).str.strip() + '-' + merged['PLAN_NUMBER'].astype(str).str.strip()
-                else:
-                    merged['TRACKING_ID'] = None
-                all_years.append(merged)
+                f5500_df['EIN'] = f5500_df['EIN'].astype(str).str.strip()
+                f5500_df['PLAN_NUMBER'] = f5500_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+                f5500_df['PLAN_YEAR'] = year
+                f5500_df['SB_KEY'] = f5500_df['EIN'] + '-' + f5500_df['PLAN_NUMBER'] + '-' + f5500_df['PLAN_YEAR'].astype(str)
+                f5500_df = f5500_df[f5500_df['SB_KEY'].isin(sb_df['SB_KEY'])]
             else:
-                logging.warning(f"No Form 5500 data for {year}; skipping year.")
+                f5500_df = pd.DataFrame(columns=sb_df.columns)
+
+            # Load and filter SR
+            sr_df = load_sr_csv(sr_path) if os.path.exists(sr_path) else pd.DataFrame()
+            if not sr_df.empty:
+                if HAS_SR:
+                    sr_df = normalize_sr_fields(sr_df)
+                else:
+                    logging.warning(f"normalize_sr_fields not available for {year}; skipping normalization for Schedule R.")
+                sr_df['EIN'] = sr_df['EIN'].astype(str).str.strip()
+                sr_df['PLAN_NUMBER'] = sr_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
+                sr_df['PLAN_YEAR'] = year
+                sr_df['SB_KEY'] = sr_df['EIN'] + '-' + sr_df['PLAN_NUMBER'] + '-' + sr_df['PLAN_YEAR'].astype(str)
+                sr_df = sr_df[sr_df['SB_KEY'].isin(sb_df['SB_KEY'])]
+            else:
+                sr_df = pd.DataFrame(columns=sb_df.columns)
+
+            # Use SB as base, left-merge 5500 and SR onto SB
+            merged = sb_df.copy()
+            if not f5500_df.empty:
+                merged = pd.merge(merged, f5500_df, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_5500'))
+            if not sr_df.empty:
+                merged = pd.merge(merged, sr_df, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_SR'))
+
+            merged['TRACKING_ID'] = merged['EIN'] + '-' + merged['PLAN_NUMBER']
+            merged['PLAN_YEAR'] = year
+
+            # Output Parquet for this year
+            yearly_dir = os.path.join(DATA_OUTPUT, 'yearly')
+            os.makedirs(yearly_dir, exist_ok=True)
+            out_path = os.path.join(yearly_dir, f"merged_{year}.parquet")
+            merged.to_parquet(out_path, index=False)
+            logging.info(f"Wrote {out_path}")
+            all_years.append(merged)
         except Exception as e:
             logging.warning(f"Error processing year {year}: {e}")
             continue
