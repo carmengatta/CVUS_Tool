@@ -1,6 +1,11 @@
 import streamlit as st
 import pandas as pd
 import os
+from dotenv import load_dotenv
+
+# Load environment variables like SERP_API_KEY
+load_dotenv()
+
 
 # ==========================================================
 # SIMPLE PASSWORD PROTECTION (Streamlit v1.25+ compatible)
@@ -143,28 +148,89 @@ elif page == "🏢 Sponsor Rollups":
 
 
 # ==========================================================
-# PAGE 4 — LEAD SCORING (COMING SOON)
+# SECTION 4 — IN-HOUSE ACTUARY DETECTION
 # ==========================================================
-elif page == "⭐ Lead Scoring (Coming Soon)":
-    st.title("⭐ Lead Scoring Engine")
+st.header("🧠 In-House Actuary Detection")
 
-    st.write("""
-    This module will identify DB plans most likely to need:
+st.write("""
+This tool helps identify whether a sponsor employs **internal actuaries** by performing 
+a structured web lookup (company site, SOA directory, LinkedIn, news articles, etc.).
+Only sponsors with **10,000+ annuitants** are shown.
+""")
 
-    - actuarial consulting  
-    - risk transfer services  
-    - valuation model upgrades  
-    - in-house actuary replacement  
-    - longevity analytics  
-    - contribution / funding optimization  
+# Step 1 — Filter sponsors with large populations
+LARGE_SPONSORS = sponsor[sponsor["retired"] > 10000].copy()
 
-    **Planned additions include:**
-    - Detection of *in-house actuaries*  
-    - Firm-size classification (WTW/Mercer/Aon vs boutique firms)  
-    - Retiree-heavy plan scoring  
-    - Funding stress indicators  
-    - Volatility risk scoring  
+if LARGE_SPONSORS.empty:
+    st.info("No sponsors with more than 10,000 annuitants found.")
+else:
+    sponsor_select = st.selectbox(
+        "Select a sponsor to investigate:",
+        LARGE_SPONSORS["sponsor_name"].unique(),
+        index=0
+    )
 
-    This page will become interactive as soon as we build the scoring engine.
-    """)
+    selected_row = LARGE_SPONSORS[
+        LARGE_SPONSORS["sponsor_name"] == sponsor_select
+    ].iloc[0]
 
+    ein = str(selected_row["ein"])
+    retired_count = int(selected_row["retired"])
+    st.subheader(f"🔎 Searching for actuaries at: **{sponsor_select}**")
+    st.caption(f"EIN: {ein} — Retirees: {retired_count:,}")
+
+    # ------------------------------------------------------
+    # Button: Run SERP API Web Search
+    # ------------------------------------------------------
+    def serp_lookup(query):
+        """Perform SERP API request."""
+        from serpapi import GoogleSearch
+        import os
+
+        api_key = os.getenv("SERP_API_KEY")
+        if not api_key:
+            st.error("Missing SERP_API_KEY in .env file.")
+            return None
+
+        params = {
+            "engine": "google",
+            "q": query,
+            "api_key": api_key
+        }
+
+        try:
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            return results
+        except Exception as e:
+            st.error(f"Search failed: {e}")
+            return None
+
+    # ------------------------------------------------------
+    # Query builder
+    # ------------------------------------------------------
+    query = f'"{sponsor_select}" actuary OR actuarial team OR pension actuarial staff'
+
+    if st.button("Run Actuary Search"):
+        with st.spinner("Searching the web for actuarial staff…"):
+            result = serp_lookup(query)
+
+        if result is None:
+            st.stop()
+
+        # Extract best results
+        organic = result.get("organic_results", [])
+        st.subheader("📄 Search Results")
+
+        if not organic:
+            st.warning("No relevant results found.")
+        else:
+            for entry in organic[:5]:  # show top 5
+                st.write(f"### [{entry.get('title')}]({entry.get('link')})")
+                st.write(entry.get("snippet", ""))
+                st.write("---")
+
+    # ------------------------------------------------------
+    # (Optional) Save results for future reuse
+    # ------------------------------------------------------
+    # TODO: You can later add persistent caching using a small SQLite db
