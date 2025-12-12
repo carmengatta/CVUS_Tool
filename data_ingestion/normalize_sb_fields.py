@@ -1,11 +1,16 @@
 """
-Normalize Schedule SB actuarial fields:
-"""
+Normalize Schedule SB actuarial fields.
+
+Responsibilities:
 - Extract participant counts
 - Extract liabilities
 - Extract actuary info
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+"""
 
+import logging
+import pandas as pd
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 # Helper functions
 
 def parse_int(val):
