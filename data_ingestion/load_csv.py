@@ -4,7 +4,7 @@ File: data_ingestion/load_csv.py
 Purpose:
     Load and preprocess raw Form 5500 CSV files obtained from DOL/EFAST2.
 
-    Responsibilities:
+Responsibilities:
     - Robust CSV loading with multiple encoding attempts
     - Normalize column names
     - Normalize EIN / PLAN_NUMBER / ACK_ID
@@ -112,7 +112,6 @@ def load_5500_csv(
         dtype_overrides = {"EIN": str, "PLAN_NUMBER": str, "ACK_ID": str}
 
     # Robust CSV load
-    last_err = None
     for enc in encodings:
         try:
             df = pd.read_csv(filepath, dtype=str, encoding=enc)
@@ -120,7 +119,6 @@ def load_5500_csv(
             break
         except Exception as e:
             logging.warning(f"Failed to load {filepath} with encoding {enc}: {e}")
-            last_err = e
     else:
         logging.error(f"All encoding attempts failed for {filepath}")
         return pd.DataFrame()
@@ -166,7 +164,11 @@ def load_5500_csv(
     # Synthesize ACK_ID if missing
     if "ACK_ID" not in df.columns and all(x in df.columns for x in ["EIN", "PLAN_NUMBER", "PLAN_YEAR"]):
         df["ACK_ID"] = (
-            df["EIN"].astype(str) + "-" + df["PLAN_NUMBER"].astype(str) + "-" + df["PLAN_YEAR"].astype(str)
+            df["EIN"].astype(str)
+            + "-"
+            + df["PLAN_NUMBER"].astype(str)
+            + "-"
+            + df["PLAN_YEAR"].astype(str)
         )
 
     # Year inference from filename
@@ -235,4 +237,15 @@ def load_5500_csv(
     interest_cols = [c for c in df.columns if "INTEREST" in c or "RATE" in c or "DISCOUNT" in c]
     df = df.drop(columns=interest_cols, errors="ignore")
 
+    return df
+
+
+def load_csv(filepath: str, year: int) -> pd.DataFrame:
+    """
+    Thin wrapper expected by the ingestion pipeline.
+    Delegates to load_5500_csv and injects YEAR.
+    """
+    df = load_5500_csv(filepath)
+    if not df.empty:
+        df["YEAR"] = year
     return df
