@@ -1,15 +1,9 @@
 """
 Normalize Schedule SB actuarial fields:
-- Preserve ACK_ID
+"""
 - Extract participant counts
 - Extract liabilities
 - Extract actuary info
-"""
-
-
-import pandas as pd
-import logging
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 # Helper functions

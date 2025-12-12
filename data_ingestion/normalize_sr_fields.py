@@ -8,6 +8,16 @@ import logging
 # Canonical header mapping for Schedule R (add more as needed)
 SR_HEADER_MAP = {
     'SCH_R_EIN': 'EIN',
+# Documentation for the new normalization process
+"""
+Form 5500 Data Ingestion: Normalize Schedule R Fields
+
+Responsibilities:
+- Normalize Schedule R fields only
+- Standardize keys (EIN, PLAN_NUMBER, ACK_ID)
+- No assumptions about plan existence
+- No filtering based on plan type
+"""
     'SCH_R_PLAN_NUM': 'PLAN_NUMBER',
     'SCH_R_PLAN_YR': 'PLAN_YEAR',
     'SCH_R_ACK_ID': 'ACK_ID',
@@ -62,6 +72,7 @@ def normalize_sr_fields(df: pd.DataFrame) -> pd.DataFrame:
     if 'PLAN_YEAR' in df.columns:
         df['PLAN_YEAR'] = pd.to_numeric(df['PLAN_YEAR'], errors='coerce')
 
+    # No filtering or plan existence logic
     # Synthesize ACK_ID if missing
     if 'ACK_ID' not in df.columns and all(x in df.columns for x in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR']):
         df['ACK_ID'] = df['EIN'].astype(str).str.strip() + '-' + df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3) + '-' + df['PLAN_YEAR'].astype(str)

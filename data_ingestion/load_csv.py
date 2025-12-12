@@ -3,15 +3,10 @@ def load_sr_csv(filepath: str, encodings=("utf-8", "latin1", "cp1252")) -> pd.Da
     Load a Schedule R CSV file and return a DataFrame with all columns preserved. No normalization is performed.
     """
     import pandas as pd
-    import logging
+    """
     last_err = None
     for enc in encodings:
         try:
-            df = pd.read_csv(filepath, dtype=str, encoding=enc)
-            logging.info(f"Loaded {filepath} with encoding {enc}")
-            return df
-        except Exception as e:
-            logging.warning(f"Failed to load {filepath} with encoding {enc}: {e}")
             last_err = e
     logging.error(f"All encoding attempts failed for {filepath}")
     return pd.DataFrame()  # Fail gracefully

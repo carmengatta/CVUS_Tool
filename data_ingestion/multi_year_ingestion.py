@@ -1,155 +1,105 @@
-
-from data_ingestion.load_csv import load_5500_csv, load_sb_csv, load_sr_csv
-import logging
-try:
-    from data_ingestion.normalize_sr_fields import normalize_sr_fields
-    HAS_SR = True
-except ImportError:
-    HAS_SR = False
-    def normalize_sr_fields(df):
-        logging.warning("normalize_sr_fields not available; skipping normalization for Schedule R.")
-        return df
-
-
-def load_multi_year_data():
-    """
-    Loads, normalizes, and merges Form 5500, Schedule SB, and Schedule R data for years 2019–2024.
-    Returns a single concatenated DataFrame for all years.
-    """
-    all_years = []
-    for year in range(2019, 2025):
-        try:
-            f5500_path = os.path.join(DATA_RAW, f"f_5500_{year}_latest.csv")
-            sb_path = os.path.join(DATA_RAW, f"F_SCH_SB_{year}_latest.csv")
-            sr_path = os.path.join(DATA_RAW, f"F_SCH_R_{year}_latest.csv")
-
-            sb_df = load_sb_csv(sb_path) if os.path.exists(sb_path) else pd.DataFrame()
-            if sb_df.empty:
-                logging.warning(f"No Schedule SB data for {year}; skipping year.")
-                continue
-            sb_df = normalize_sb_fields(sb_df, plan_year=year)
-            # Create unique key for SB
-            sb_df['EIN'] = sb_df['EIN'].astype(str).str.strip()
-            sb_df['PLAN_NUMBER'] = sb_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
-            sb_df['PLAN_YEAR'] = year
-            sb_df['SB_KEY'] = sb_df['EIN'] + '-' + sb_df['PLAN_NUMBER'] + '-' + sb_df['PLAN_YEAR'].astype(str)
-
-            # Load and filter 5500
-            f5500_df = load_5500_csv(f5500_path) if os.path.exists(f5500_path) else pd.DataFrame()
-            if not f5500_df.empty:
-                f5500_df['EIN'] = f5500_df['EIN'].astype(str).str.strip()
-                f5500_df['PLAN_NUMBER'] = f5500_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
-                f5500_df['PLAN_YEAR'] = year
-                f5500_df['SB_KEY'] = f5500_df['EIN'] + '-' + f5500_df['PLAN_NUMBER'] + '-' + f5500_df['PLAN_YEAR'].astype(str)
-                f5500_df = f5500_df[f5500_df['SB_KEY'].isin(sb_df['SB_KEY'])]
-            else:
-                f5500_df = pd.DataFrame(columns=sb_df.columns)
-
-            # Load and filter SR
-            sr_df = load_sr_csv(sr_path) if os.path.exists(sr_path) else pd.DataFrame()
-            if not sr_df.empty:
-                if HAS_SR:
-                    sr_df = normalize_sr_fields(sr_df)
-                else:
-                    logging.warning(f"normalize_sr_fields not available for {year}; skipping normalization for Schedule R.")
-                sr_df['EIN'] = sr_df['EIN'].astype(str).str.strip()
-                sr_df['PLAN_NUMBER'] = sr_df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3)
-                sr_df['PLAN_YEAR'] = year
-                sr_df['SB_KEY'] = sr_df['EIN'] + '-' + sr_df['PLAN_NUMBER'] + '-' + sr_df['PLAN_YEAR'].astype(str)
-                sr_df = sr_df[sr_df['SB_KEY'].isin(sb_df['SB_KEY'])]
-            else:
-                sr_df = pd.DataFrame(columns=sb_df.columns)
-
-            # Use SB as base, left-merge 5500 and SR onto SB
-            merged = sb_df.copy()
-            if not f5500_df.empty:
-                merged = pd.merge(merged, f5500_df, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_5500'))
-            if not sr_df.empty:
-                merged = pd.merge(merged, sr_df, on=['EIN', 'PLAN_NUMBER', 'PLAN_YEAR'], how='left', suffixes=('', '_SR'))
-
-            merged['TRACKING_ID'] = merged['EIN'] + '-' + merged['PLAN_NUMBER']
-            merged['PLAN_YEAR'] = year
-
-            # Output Parquet for this year
-            yearly_dir = os.path.join(DATA_OUTPUT, 'yearly')
-            os.makedirs(yearly_dir, exist_ok=True)
-            out_path = os.path.join(yearly_dir, f"merged_{year}.parquet")
-            merged.to_parquet(out_path, index=False)
-            logging.info(f"Wrote {out_path}")
-            all_years.append(merged)
-        except Exception as e:
-            logging.warning(f"Error processing year {year}: {e}")
-            continue
-    if all_years:
-        return pd.concat(all_years, ignore_index=True, sort=False)
-    else:
-        return pd.DataFrame()
 """
-Multi-Year Ingestion Engine
+Form 5500 Data Ingestion: Multi-Year Pipeline
 
-This script loads, normalizes, and merges Form 5500, Schedule SB, and Schedule R data for all available years (2019–2024), producing unified master and sponsor rollup datasets.
+Responsibilities:
+- For each year (2019–2024):
+    - Load SB, 5500, SR
+    - Normalize each dataset
+    - Merge SB → 5500 → SR
+    - Add YEAR
+    - Add TRACKING_ID
+    - Validate row counts
+- Concatenate all years
+- Enforce no duplicate (TRACKING_ID, YEAR)
+- Write final parquet outputs
+- Add explicit validation logging
 """
 
 import os
 import pandas as pd
-from glob import glob
-from data_ingestion.load_csv import load_5500_csv
-from data_ingestion.load_csv import load_5500_csv as load_sb_csv  # If SB uses same loader
-from data_ingestion.load_csv import load_5500_csv as load_r_csv   # If R uses same loader
-from data_ingestion.normalize_sb_fields import normalize_sb_fields
-from data_ingestion.merge_sb_5500 import merge_sb_5500
-from data_analysis.build_sponsor_rollup import build_sponsor_rollup, save_sponsor_rollup_parquet
+from .load_csv import load_csv
+from .normalize_sb_fields import normalize_sb_fields
+from .normalize_sr_fields import normalize_sr_fields
+from .merge_sb_5500 import merge_sb_5500
+from .merge_sb_sr import merge_sb_sr
 
-DATA_RAW = "data_raw"
-DATA_OUTPUT = "data_output"
+RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "data_raw")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "data_output", "yearly")
+
 YEARS = list(range(2019, 2025))
 
-master_dfs = []
-sponsor_rollups = []
+SB_PREFIX = "F_SCH_SB_"
+F5500_PREFIX = "F_5500_"
+SR_PREFIX = "F_SCH_R_"
 
-for year in YEARS:
-    # Detect files
-    f5500_files = glob(os.path.join(DATA_RAW, f"f_5500_{year}_latest.csv"))
-    sb_files = glob(os.path.join(DATA_RAW, f"F_SCH_SB_{year}_latest.csv"))
-    r_files = glob(os.path.join(DATA_RAW, f"F_SCH_R_{year}_latest.csv"))
-    if not f5500_files:
-        print(f"[!] Missing Form 5500 for {year}, skipping year.")
-        continue
-    print(f"[+] Loading {year}...")
-    # Load and normalize
-    f5500_df = load_5500_csv(f5500_files[0])
-    sb_df = load_sb_csv(sb_files[0]) if sb_files else pd.DataFrame()
-    r_df = load_r_csv(r_files[0]) if r_files else pd.DataFrame()
-    # Normalize SB
-    if not sb_df.empty:
-        sb_df = normalize_sb_fields(sb_df)
-    # Merge 5500 + SB
-    if not sb_df.empty:
-        merged, _ = merge_sb_5500(sb_df, f5500_df) if isinstance(merge_sb_5500(sb_df, f5500_df), tuple) else (merge_sb_5500(sb_df, f5500_df), None)
-    else:
-        merged = f5500_df.copy()
-    # Merge R if available (left join on EIN, PLAN_NUMBER)
-    if not r_df.empty and {'EIN', 'PLAN_NUMBER'}.issubset(merged.columns) and {'EIN', 'PLAN_NUMBER'}.issubset(r_df.columns):
-        merged = pd.merge(merged, r_df, on=['EIN', 'PLAN_NUMBER'], how='left', suffixes=('', '_R'))
-    # Add PLAN_YEAR
-    merged['PLAN_YEAR'] = year
-    master_dfs.append(merged)
-    # Sponsor rollup
-    try:
-        sponsor_rollup = build_sponsor_rollup(merged)
-        sponsor_rollup['PLAN_YEAR'] = year
-        sponsor_rollups.append(sponsor_rollup)
-        # Save yearly rollup
-        save_sponsor_rollup_parquet(sponsor_rollup, filename=f"sponsor_rollup_{year}.parquet")
-    except Exception as e:
-        print(f"[!] Sponsor rollup failed for {year}: {e}")
+SB_TERM_PARTCP_CNT = "SB_TERM_PARTCP_CNT"
 
-# Combine all years
-if master_dfs:
-    master_all = pd.concat(master_dfs, ignore_index=True, sort=False)
-    master_all.to_parquet(os.path.join(DATA_OUTPUT, "master_db_all_years.parquet"), index=False)
-    print(f"[✔] Saved all-years master DB → {os.path.join(DATA_OUTPUT, 'master_db_all_years.parquet')}")
-if sponsor_rollups:
-    sponsor_all = pd.concat(sponsor_rollups, ignore_index=True, sort=False)
-    sponsor_all.to_parquet(os.path.join(DATA_OUTPUT, "sponsor_rollup_all_years.parquet"), index=False)
-    print(f"[✔] Saved all-years sponsor rollup → {os.path.join(DATA_OUTPUT, 'sponsor_rollup_all_years.parquet')}")
+def process_year(year: int) -> pd.DataFrame:
+    """
+    Process a single year: load, normalize, merge, validate, and return merged DataFrame.
+    """
+    # Filepaths
+    sb_path = os.path.join(RAW_DIR, f"{SB_PREFIX}{year}_latest.csv")
+    f5500_path = os.path.join(RAW_DIR, f"{F5500_PREFIX}{year}_latest.csv")
+    sr_path = os.path.join(RAW_DIR, f"{SR_PREFIX}{year}_latest.csv")
+
+    # Load
+    sb = load_csv(sb_path, year)
+    f5500 = load_csv(f5500_path, year)
+    sr = load_csv(sr_path, year)
+
+    # Normalize
+    sb = normalize_sb_fields(sb)
+    # Form 5500 keys are normalized by load_csv():
+    # - Uppercase column names
+    # - String dtype for identifiers
+    # - Trimmed values
+    sr = normalize_sr_fields(sr)
+
+    # Merge SB ↔ 5500
+    merged = merge_sb_5500(sb, f5500)
+
+    # Merge SB ↔ SR with ACK_ID fallback logic
+    merged_sr = merge_sb_sr(merged, sr)
+
+    # Add TRACKING_ID
+    merged_sr["TRACKING_ID"] = merged_sr["EIN"].astype(str) + "-" + merged_sr["PLAN_NUMBER"].astype(str)
+
+    # Validation: No null EIN/PLAN_NUMBER, no duplicate keys
+    assert merged_sr["EIN"].notnull().all(), f"Null EINs in year {year} after merge."
+    assert merged_sr["PLAN_NUMBER"].notnull().all(), f"Null PLAN_NUMBERs in year {year} after merge."
+    assert merged_sr[["TRACKING_ID", "YEAR"]].duplicated().sum() == 0, f"Duplicate (TRACKING_ID, YEAR) in year {year}."
+
+    # Validation: Approximate % of Form 5500 rows dropped
+    pct_dropped = 1 - (len(merged) / len(f5500)) if len(f5500) > 0 else 0
+    print(f"[Year {year}] Approx. Form 5500 rows dropped: {pct_dropped:.2%} ({len(f5500) - len(merged)}/{len(f5500)})")
+    print(f"[Year {year}] SB row count: {len(sb)}, merged row count: {len(merged)}")
+
+    # Validation: SEPARATED_COUNT must come only from SB
+    if SB_TERM_PARTCP_CNT in merged_sr.columns:
+        assert merged_sr[SB_TERM_PARTCP_CNT].notnull().all(), f"Null SB_TERM_PARTCP_CNT in year {year}."
+
+    # Write annual output
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, f"db_plans_{year}.parquet")
+    merged_sr.to_parquet(out_path, index=False)
+    print(f"[Year {year}] Wrote {out_path} ({len(merged_sr)} rows)")
+    return merged_sr
+
+def run_multi_year_pipeline():
+    """
+    Run the full multi-year pipeline and write master output.
+    """
+    all_years = []
+    for year in YEARS:
+        df = process_year(year)
+        all_years.append(df)
+    master = pd.concat(all_years, ignore_index=True)
+    # Final validation: no duplicate (TRACKING_ID, YEAR)
+    assert master[["TRACKING_ID", "YEAR"]].duplicated().sum() == 0, "Duplicate (TRACKING_ID, YEAR) in master dataset."
+    master_out = os.path.join(OUTPUT_DIR, "db_plans_master.parquet")
+    master.to_parquet(master_out, index=False)
+    print(f"[ALL YEARS] Wrote {master_out} ({len(master)} rows)")
+
+# Example usage (for testing only, remove in production):
+# run_multi_year_pipeline()

@@ -65,15 +65,10 @@ def merge_sb_5500(df_5500: pd.DataFrame, df_sb: pd.DataFrame, df_sr: pd.DataFram
     # Log any non-SB plans (should be none, but for audit)
     if not df_5500.empty:
         non_sb_5500 = df_5500[~df_5500['SB_KEY'].isin(df_sb['SB_KEY'])]
-        if not non_sb_5500.empty:
+        """
             logging.info(f"{len(non_sb_5500)} Form 5500 records dropped as non-SB plans.")
     if not df_sr.empty:
         non_sb_sr = df_sr[~df_sr['SB_KEY'].isin(df_sb['SB_KEY'])]
-        if not non_sb_sr.empty:
-            logging.info(f"{len(non_sb_sr)} Schedule R records dropped as non-SB plans.")
-
-    # Remove all interest rate/segment rate fields if present
-    interest_cols = [c for c in merged.columns if 'INTEREST' in c.upper() or 'SEGMENT' in c.upper() or 'RATE' in c.upper()]
     merged = merged.drop(columns=interest_cols, errors='ignore')
 
     return merged.reset_index(drop=True)
