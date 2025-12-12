@@ -33,6 +33,7 @@ def validate_5500_chunk(chunk, year):
     chunk = chunk[mask]
     return chunk
 
+<<<<<<< HEAD
 def combine_5500_years(years, data_dir, file_prefix, file_suffix, output_file, chunk_size=500_000):
     def year_chunks():
         for year in years:
@@ -56,6 +57,48 @@ def combine_5500_years(years, data_dir, file_prefix, file_suffix, output_file, c
         chunk.to_csv(output_file, mode='w' if first_chunk else 'a', index=False, header=first_chunk)
         first_chunk = False
     logging.info(f"Combined file written to {output_file}")
+=======
+
+# Multi-year combine function for 2019–2024, no interest fields, interim outputs, returns list of (year, merged_df)
+def combine_years(
+    years=range(2019, 2025),
+    data_dir="data_raw",
+    output_dir="data_output/yearly",
+    load_5500=None,
+    load_sb=None,
+    load_sr=None,
+    normalize_sb=None,
+    merge_func=None
+):
+    os.makedirs(output_dir, exist_ok=True)
+    results = []
+    for year in years:
+        logging.info(f"Processing year {year}")
+        f5500_path = os.path.join(data_dir, f"f_5500_{year}_latest.csv")
+        sb_path = os.path.join(data_dir, f"F_SCH_SB_{year}_latest.csv")
+        sr_path = os.path.join(data_dir, f"F_SCH_R_{year}_latest.csv")
+        # Load
+        df_5500 = load_5500(f5500_path) if load_5500 and os.path.exists(f5500_path) else None
+        df_sb = load_sb(sb_path) if load_sb and os.path.exists(sb_path) else None
+        df_sr = load_sr(sr_path) if load_sr and os.path.exists(sr_path) else None
+        # Normalize SB
+        if df_sb is not None and normalize_sb:
+            df_sb = normalize_sb(df_sb, plan_year=year)
+        # Merge
+        if merge_func:
+            merged = merge_func(df_5500, df_sb, df_sr)
+        else:
+            merged = df_5500  # fallback
+        # Write interim output
+        out_path = os.path.join(output_dir, f"merged_{year}.parquet")
+        if merged is not None:
+            merged.to_parquet(out_path, index=False)
+            logging.info(f"Wrote {out_path}")
+            results.append((year, merged))
+        else:
+            logging.warning(f"No merged data for year {year}")
+    return results
+>>>>>>> 97a434b (upd. coding after agent updates)
 
 
 def validate_sb_chunk(chunk, year):
