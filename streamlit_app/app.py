@@ -53,14 +53,23 @@ if st.sidebar.button("Logout"):
 # YEAR SELECTION & DATA LOADING (with caching)
 # ==========================================================
 st.sidebar.markdown("---")
+
+# --- Improved year extraction: only use files with numeric year suffix ---
+import re
 YEARLY_DIR = "data_output/yearly"
+year_files = [f for f in os.listdir(YEARLY_DIR) if f.startswith("db_plans_") and f.endswith(".parquet")]
 years_available = sorted([
-    int(f.split("_")[-1].split(".")[0])
-    for f in os.listdir(YEARLY_DIR)
-    if f.startswith("db_plans_") and f.endswith(".parquet")
+    int(m.group(1))
+    for f in year_files
+    if (m := re.match(r"db_plans_(\d{4})\.parquet$", f))
 ])
+if not years_available:
+    st.error("No yearly DB plan files found in data_output/yearly.")
+    st.stop()
 def_year = max(years_available)
+st.sidebar.markdown("## Data Controls")
 selected_year = st.sidebar.selectbox("Filing Year", years_available, index=years_available.index(def_year))
+st.sidebar.markdown("---")
 
 @st.cache_data
 def load_db_parquet(year):
