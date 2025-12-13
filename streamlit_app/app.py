@@ -91,35 +91,40 @@ if page == "📊 Dashboard":
     st.caption("All data is DB-only, SB-driven, and year-specific.")
 
     # --- Top Plans by Retiree Count ---
+
     st.subheader("Top Plans by Retiree Count")
     top_n = st.slider("Show top N plans", 5, 50, 10)
     if "RETIRED" in db.columns:
+        cols = [c for c in ["EIN", "PLAN_NAME", "RETIRED", "SB_TERM_PARTCP_CNT", "LIABILITY_TOTAL"] if c in db.columns]
         top_plans = db.sort_values("RETIRED", ascending=False).head(top_n)
-        st.dataframe(top_plans[["EIN", "PLAN_NAME", "RETIRED", "SB_TERM_PARTCP_CNT", "LIABILITY_TOTAL"]], use_container_width=True)
+        st.dataframe(top_plans[cols], use_container_width=True)
     else:
-        st.info("Retiree count column not found.")
+        st.warning("Retiree count column (RETIRED) not found in this file. Please check your data export.")
 
     st.divider()
 
     # --- Top Companies by Total Retirees (EIN rollup) ---
+
     st.subheader("Top Companies by Total Retirees (EIN Rollup)")
-    if "RETIRED" in db.columns:
+    if "RETIRED" in db.columns and "EIN" in db.columns:
         ein_rollup = db.groupby(["EIN"]).agg({
-            "RETIRED": "sum",
-            "PLAN_NAME": "count",
-            "LIABILITY_TOTAL": "sum"
+            k: v for k, v in {"RETIRED": "sum", "PLAN_NAME": "count", "LIABILITY_TOTAL": "sum"}.items() if k in db.columns
         }).rename(columns={"PLAN_NAME": "NUM_PLANS"}).reset_index()
         ein_rollup = ein_rollup.sort_values("RETIRED", ascending=False)
         st.dataframe(ein_rollup.head(top_n), use_container_width=True)
     else:
-        st.info("Retiree count column not found for company rollup.")
+        st.warning("Required columns (RETIRED, EIN) not found for company rollup.")
 
     st.divider()
 
     # --- Plan Size Distribution ---
+
     st.subheader("Plan Size Distribution")
     st.write("Distribution of plans by participant count (SB_TERM_PARTCP_CNT)")
-    st.bar_chart(db["SB_TERM_PARTCP_CNT"].value_counts().sort_index())
+    if "SB_TERM_PARTCP_CNT" in db.columns:
+        st.bar_chart(db["SB_TERM_PARTCP_CNT"].value_counts().sort_index())
+    else:
+        st.warning("Participant count column (SB_TERM_PARTCP_CNT) not found in this file.")
 
     # --- Participant Mix ---
     st.subheader("Participant Mix (Active / Retired / Terminated)")
