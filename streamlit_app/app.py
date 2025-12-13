@@ -1,13 +1,15 @@
+
 import streamlit as st
 import pandas as pd
 import os
-
 
 # ==========================================================
 # SIMPLE PASSWORD PROTECTION (Streamlit v1.25+ compatible)
 # ==========================================================
 PASSWORD = "CVUSTool"  # CHANGE FOR DEPLOYMENT
 
+def password_gate():
+    pw = st.text_input("Enter password:", type="password")
     if pw == PASSWORD:
         st.session_state["authenticated"] = True
         st.success("Access granted!")
