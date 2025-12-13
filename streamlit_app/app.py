@@ -1,20 +1,12 @@
 import streamlit as st
 import pandas as pd
 import os
-from dotenv import load_dotenv
-
-# Load environment variables like SERP_API_KEY
-load_dotenv()
 
 
 # ==========================================================
 # SIMPLE PASSWORD PROTECTION (Streamlit v1.25+ compatible)
 # ==========================================================
 PASSWORD = "CVUSTool"  # CHANGE FOR DEPLOYMENT
-
-def password_gate():
-    st.title("🔐 Secure Access")
-    pw = st.text_input("Enter password:", type="password")
 
     if pw == PASSWORD:
         st.session_state["authenticated"] = True
@@ -54,59 +46,79 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 
+
 # ==========================================================
-# LOAD DATA HELPERS
+# YEAR SELECTION & DATA LOADING (with caching)
 # ==========================================================
-MASTER_PATH = "data_output/master_db_latest.parquet"
-SPONSOR_PATH = "data_output/sponsor_rollup_latest.parquet"
+st.sidebar.markdown("---")
+YEARLY_DIR = "data_output/yearly"
+years_available = sorted([
+    int(f.split("_")[-1].split(".")[0])
+    for f in os.listdir(YEARLY_DIR)
+    if f.startswith("db_plans_") and f.endswith(".parquet")
+])
+def_year = max(years_available)
+selected_year = st.sidebar.selectbox("Filing Year", years_available, index=years_available.index(def_year))
 
 @st.cache_data
-def load_master():
-    if not os.path.exists(MASTER_PATH):
-        st.error(f"Missing required dataset: `{MASTER_PATH}`")
+def load_db_parquet(year):
+    path = os.path.join(YEARLY_DIR, f"db_plans_{year}.parquet")
+    if not os.path.exists(path):
+        st.error(f"Missing required dataset: `{path}`")
         st.stop()
-    return pd.read_parquet(MASTER_PATH)
+    return pd.read_parquet(path)
 
-@st.cache_data
-def load_sponsor_rollup():
-    if not os.path.exists(SPONSOR_PATH):
-        st.error(f"Missing required dataset: `{SPONSOR_PATH}`")
-        st.stop()
-    return pd.read_parquet(SPONSOR_PATH)
+db = load_db_parquet(selected_year)
 
-master = load_master()
-sponsor = load_sponsor_rollup()
 
 
 # ==========================================================
-# PAGE 1 — DASHBOARD
+# DYNAMIC DASHBOARD: TOP PLANS & COMPANY ROLLUP (selected year)
 # ==========================================================
 if page == "📊 Dashboard":
-    st.title("📊 US Private-Sector DB Plan Analytics Dashboard")
-    st.write("Built from Form 5500 + Schedule SB filings")
-    st.success("Datasets loaded successfully!")
+    st.title(f"Defined Benefit Plan Dashboard — {selected_year}")
+    st.caption("All data is DB-only, SB-driven, and year-specific.")
 
-    # ----- Summary Metrics -----
-    st.header("📌 Summary Metrics")
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total DB Plans", f"{len(master):,}")
-    col2.metric("Unique Sponsors (EIN)", f"{master['ein'].nunique():,}")
-    col3.metric("Total Retirees", f"{master['retired'].sum():,}")
-    col4.metric("Total Liability ($)", f"${master['liability_total'].sum():,}")
+    # --- Top Plans by Retiree Count ---
+    st.subheader("Top Plans by Retiree Count")
+    top_n = st.slider("Show top N plans", 5, 50, 10)
+    if "RETIRED" in db.columns:
+        top_plans = db.sort_values("RETIRED", ascending=False).head(top_n)
+        st.dataframe(top_plans[["EIN", "PLAN_NAME", "RETIRED", "SB_TERM_PARTCP_CNT", "LIABILITY_TOTAL"]], use_container_width=True)
+    else:
+        st.info("Retiree count column not found.")
 
     st.divider()
 
-    # ----- Top Plans -----
-    st.header("🏆 Top 25 Plans by Retiree Count")
+    # --- Top Companies by Total Retirees (EIN rollup) ---
+    st.subheader("Top Companies by Total Retirees (EIN Rollup)")
+    if "RETIRED" in db.columns:
+        ein_rollup = db.groupby(["EIN"]).agg({
+            "RETIRED": "sum",
+            "PLAN_NAME": "count",
+            "LIABILITY_TOTAL": "sum"
+        }).rename(columns={"PLAN_NAME": "NUM_PLANS"}).reset_index()
+        ein_rollup = ein_rollup.sort_values("RETIRED", ascending=False)
+        st.dataframe(ein_rollup.head(top_n), use_container_width=True)
+    else:
+        st.info("Retiree count column not found for company rollup.")
 
-    st.dataframe(
-        master[
-            ["sponsor_dfe_name", "plan_name", "retired", "liability_total"]
-        ].sort_values("retired", ascending=False).head(25),
-        use_container_width=True,
-        height=600
-    )
+    st.divider()
+
+    # --- Plan Size Distribution ---
+    st.subheader("Plan Size Distribution")
+    st.write("Distribution of plans by participant count (SB_TERM_PARTCP_CNT)")
+    st.bar_chart(db["SB_TERM_PARTCP_CNT"].value_counts().sort_index())
+
+    # --- Participant Mix ---
+    st.subheader("Participant Mix (Active / Retired / Terminated)")
+    if all(col in db.columns for col in ["ACTIVE", "RETIRED", "TERMINATED"]):
+        mix = db[["ACTIVE", "RETIRED", "TERMINATED"]].sum()
+        mix_pct = mix / mix.sum()
+        st.write("Percent composition of all loaded plans:")
+        st.bar_chart(mix_pct)
+    else:
+        st.info("Participant mix columns not available in this dataset.")
 
 
 # ==========================================================
