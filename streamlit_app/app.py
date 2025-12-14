@@ -86,7 +86,7 @@ if menu == "Dashboard":
     total_participants = int(db[participant_col].sum()) if participant_col else "N/A"
     kpi_cols[0].metric("Total Plans", total_plans)
     kpi_cols[1].metric("Total Retirees", total_retirees)
-    kpi_cols[2].metric("Total Liability", f"${total_liability:,.0f}" if total_liability != "N/A" else "N/A")
+    kpi_cols[2].metric("Total Liability", f"{total_liability:,.0f}" if total_liability != "N/A" else "N/A")
     kpi_cols[3].metric("Total Participants", total_participants)
 
     st.markdown("---")
@@ -121,6 +121,8 @@ if menu == "Dashboard":
             st.download_button("Download Table", ein_rollup.head(top_n).to_csv(index=False), file_name="top_companies.csv")
         else:
             st.warning("Required columns not found for company rollup.")
+        st.write(f"{total_plans:,}")
+        st.write(f"{total_retirees:,}")
 
     with tab3:
         st.subheader("Plan Size Distribution")
