@@ -109,16 +109,29 @@ if menu == "Dashboard":
     with tab2:
         st.subheader("Top Companies by Total Retirees (EIN Rollup)")
         retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
+        sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in db.columns), None)
         if retiree_col and "EIN" in db.columns:
             agg_dict = {retiree_col: "sum"}
             if "PLAN_NAME" in db.columns:
                 agg_dict["PLAN_NAME"] = "count"
             if "LIABILITY_TOTAL" in db.columns:
                 agg_dict["LIABILITY_TOTAL"] = "sum"
+            # For sponsor name, take the first non-null value per EIN
+            if sponsor_col:
+                sponsor_names = db.groupby("EIN")[sponsor_col].first().reset_index()
+            else:
+                sponsor_names = None
             ein_rollup = db.groupby(["EIN"]).agg(agg_dict).rename(columns={"PLAN_NAME": "NUM_PLANS"}).reset_index()
+            if sponsor_names is not None:
+                ein_rollup = ein_rollup.merge(sponsor_names, on="EIN", how="left")
+            # Reorder columns for clarity
+            display_cols = ["EIN"]
+            if sponsor_col:
+                display_cols.append(sponsor_col)
+            display_cols += [col for col in [retiree_col, "NUM_PLANS", "LIABILITY_TOTAL"] if col in ein_rollup.columns]
             ein_rollup = ein_rollup.sort_values(retiree_col, ascending=False)
-            st.dataframe(ein_rollup.head(top_n), use_container_width=True)
-            st.download_button("Download Table", ein_rollup.head(top_n).to_csv(index=False), file_name="top_companies.csv")
+            st.dataframe(ein_rollup[display_cols].head(top_n), use_container_width=True)
+            st.download_button("Download Table", ein_rollup[display_cols].head(top_n).to_csv(index=False), file_name="top_companies.csv")
         else:
             st.warning("Required columns not found for company rollup.")
         st.write(f"{total_plans:,}")
