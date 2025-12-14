@@ -170,15 +170,27 @@ elif menu == "Data Explorer":
     with col1:
         ein_filter = st.text_input("Filter by EIN (partial or full)")
     with col2:
-        plan_filter = st.text_input("Filter by Plan Name (partial)")
+        sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in db.columns), None)
+        sponsor_filter = st.text_input("Filter by Plan Sponsor Name (partial)")
     filtered = db.copy()
     if ein_filter:
         filtered = filtered[filtered["EIN"].astype(str).str.contains(ein_filter, case=False, na=False)]
-    if plan_filter:
-        filtered = filtered[filtered["PLAN_NAME"].astype(str).str.contains(plan_filter, case=False, na=False)]
+    if sponsor_filter and sponsor_col:
+        filtered = filtered[filtered[sponsor_col].astype(str).str.contains(sponsor_filter, case=False, na=False)]
     st.write(f"Showing {len(filtered)} plans.")
-    st.dataframe(filtered, use_container_width=True)
-    st.download_button("Download Filtered Data", filtered.to_csv(index=False), file_name="filtered_plans.csv")
+    # Determine sponsor and plan name columns
+    sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in filtered.columns), None)
+    plan_name_col = next((c for c in ["PLAN_NAME"] if c in filtered.columns), None)
+    # Build display columns: always show sponsor and plan name if available
+    display_cols = []
+    if sponsor_col:
+        display_cols.append(sponsor_col)
+    if plan_name_col:
+        display_cols.append(plan_name_col)
+    # Add the rest of the columns (avoid duplicates)
+    display_cols += [col for col in filtered.columns if col not in display_cols]
+    st.dataframe(filtered[display_cols], use_container_width=True)
+    st.download_button("Download Filtered Data", filtered[display_cols].to_csv(index=False), file_name="filtered_plans.csv")
 
 # =============================
 # ABOUT PAGE
