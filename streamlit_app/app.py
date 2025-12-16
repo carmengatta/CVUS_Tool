@@ -90,8 +90,9 @@ if menu == "Dashboard":
     kpi_cols[3].metric("Total Participants", total_participants)
 
     st.markdown("---")
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Top Plans", "Top Companies", "Plan Size Distribution", "Participant Mix"
+    # Modified: Removed 'Plan Size Distribution' and 'Participant Mix' tabs, added 'Location' tab
+    tab1, tab2, tab3 = st.tabs([
+        "Top Plans", "Top Companies", "Location"
     ])
 
     with tab1:
@@ -137,26 +138,19 @@ if menu == "Dashboard":
         st.write(f"{total_plans:,}")
         st.write(f"{total_retirees:,}")
 
+    # New Location tab
     with tab3:
-        st.subheader("Plan Size Distribution")
-        st.write("Distribution of plans by participant count (SB_TERM_PARTCP_CNT)")
-        if "SB_TERM_PARTCP_CNT" in db.columns:
-            st.bar_chart(db["SB_TERM_PARTCP_CNT"].value_counts().sort_index())
+        st.subheader("Plan Location (City & State)")
+        # Try to find city and state columns from Form 5500 (not SB)
+        city_col = next((c for c in ["SPONS_DFE_MAIL_US_CITY", "SPONSOR_CITY", "CITY"] if c in db.columns), None)
+        state_col = next((c for c in ["SPONS_DFE_MAIL_US_STATE", "SPONSOR_STATE", "STATE"] if c in db.columns), None)
+        if city_col and state_col:
+            loc_df = db[["EIN", "PLAN_NAME", city_col, state_col]].drop_duplicates()
+            loc_df = loc_df.rename(columns={city_col: "City", state_col: "State"})
+            st.dataframe(loc_df, use_container_width=True)
+            st.download_button("Download Locations", loc_df.to_csv(index=False), file_name="plan_locations.csv")
         else:
-            st.warning("Participant count column not found in this file.")
-
-    with tab4:
-        st.subheader("Participant Mix (Active / Retired / Terminated)")
-        active_col = next((c for c in ["ACTIVE_COUNT", "ACTIVE"] if c in db.columns), None)
-        retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
-        term_col = next((c for c in ["SEPARATED_COUNT", "TERMINATED"] if c in db.columns), None)
-        if all([active_col, retiree_col, term_col]):
-            mix = db[[active_col, retiree_col, term_col]].sum()
-            mix_pct = mix / mix.sum()
-            st.write("Percent composition of all loaded plans:")
-            st.bar_chart(mix_pct)
-        else:
-            st.info("Participant mix columns not available in this dataset.")
+            st.warning("City and/or State columns not found in this file.")
 
 # =============================
 # DATA EXPLORER PAGE
