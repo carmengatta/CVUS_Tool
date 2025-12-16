@@ -78,11 +78,11 @@ if menu == "Dashboard":
     # --- KPIs ---
     kpi_cols = st.columns(4)
     total_plans = len(db)
-    retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
+    retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db.columns else None
     total_retirees = int(db[retiree_col].sum()) if retiree_col else "N/A"
     liability_col = "LIABILITY_TOTAL" if "LIABILITY_TOTAL" in db.columns else None
     total_liability = float(db[liability_col].sum()) if liability_col else "N/A"
-    participant_col = "SB_TERM_PARTCP_CNT" if "SB_TERM_PARTCP_CNT" in db.columns else None
+    participant_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in db.columns else None
     total_participants = int(db[participant_col].sum()) if participant_col else "N/A"
     kpi_cols[0].metric("Total Plans", total_plans)
     kpi_cols[1].metric("Total Retirees", total_retirees)
@@ -98,9 +98,12 @@ if menu == "Dashboard":
     with tab1:
         st.subheader("Top Plans by Retiree Count")
         top_n = st.slider("Show top N plans", 5, 50, 10, key="top_n_slider")
-        retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
+        retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db.columns else None
+        separated_col = "SEPARATED_COUNT" if "SEPARATED_COUNT" in db.columns else None
+        active_col = "ACTIVE_COUNT" if "ACTIVE_COUNT" in db.columns else None
+        total_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in db.columns else None
         if retiree_col:
-            cols = [c for c in ["EIN", "PLAN_NAME", retiree_col, "SB_TERM_PARTCP_CNT", "LIABILITY_TOTAL"] if c in db.columns]
+            cols = [c for c in ["EIN", "PLAN_NAME", active_col, retiree_col, separated_col, total_col, "LIABILITY_TOTAL"] if c and c in db.columns]
             top_plans = db.sort_values(retiree_col, ascending=False).head(top_n)
             st.dataframe(top_plans[cols], use_container_width=True)
             st.download_button("Download Table", top_plans[cols].to_csv(index=False), file_name="top_plans.csv")
@@ -109,7 +112,7 @@ if menu == "Dashboard":
 
     with tab2:
         st.subheader("Top Companies by Total Retirees (EIN Rollup)")
-        retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
+        retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db.columns else None
         sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in db.columns), None)
         if retiree_col and "EIN" in db.columns:
             agg_dict = {retiree_col: "sum"}
@@ -145,8 +148,10 @@ if menu == "Dashboard":
         city_col = next((c for c in ["SPONS_DFE_MAIL_US_CITY", "SPONSOR_CITY", "CITY"] if c in db.columns), None)
         state_col = next((c for c in ["SPONS_DFE_MAIL_US_STATE", "SPONSOR_STATE", "STATE"] if c in db.columns), None)
         sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in db.columns), None)
-        retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
-        total_count_col = next((c for c in ["SB_TOT_PARTCP_CNT"] if c in db.columns), None)
+        active_col = "ACTIVE_COUNT" if "ACTIVE_COUNT" in db.columns else None
+        retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db.columns else None
+        separated_col = "SEPARATED_COUNT" if "SEPARATED_COUNT" in db.columns else None
+        total_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in db.columns else None
 
         if city_col and state_col:
             # Build DataFrame with all required columns
@@ -154,18 +159,26 @@ if menu == "Dashboard":
             if sponsor_col:
                 columns.append(sponsor_col)
             columns += [city_col, state_col]
+            if active_col:
+                columns.append(active_col)
             if retiree_col:
                 columns.append(retiree_col)
-            if total_count_col:
-                columns.append(total_count_col)
+            if separated_col:
+                columns.append(separated_col)
+            if total_col:
+                columns.append(total_col)
             loc_df = db[columns].drop_duplicates()
             rename_dict = {city_col: "City", state_col: "State"}
             if sponsor_col:
                 rename_dict[sponsor_col] = "Plan Sponsor"
+            if active_col:
+                rename_dict[active_col] = "Active Count"
             if retiree_col:
                 rename_dict[retiree_col] = "Retiree Count"
-            if total_count_col:
-                rename_dict[total_count_col] = "Total Count"
+            if separated_col:
+                rename_dict[separated_col] = "Terminated Vested Count"
+            if total_col:
+                rename_dict[total_col] = "Total Count"
             loc_df = loc_df.rename(columns=rename_dict)
 
             # Multi-select filter for State
