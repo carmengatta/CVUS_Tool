@@ -141,14 +141,40 @@ if menu == "Dashboard":
     # New Location tab
     with tab3:
         st.subheader("Plan Location (City & State)")
-        # Try to find city and state columns from Form 5500 (not SB)
+        # Identify columns
         city_col = next((c for c in ["SPONS_DFE_MAIL_US_CITY", "SPONSOR_CITY", "CITY"] if c in db.columns), None)
         state_col = next((c for c in ["SPONS_DFE_MAIL_US_STATE", "SPONSOR_STATE", "STATE"] if c in db.columns), None)
+        sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in db.columns), None)
+        retiree_col = next((c for c in ["RETIREE_COUNT", "RETIRED"] if c in db.columns), None)
+        total_count_col = next((c for c in ["SB_TOT_PARTCP_CNT"] if c in db.columns), None)
+
         if city_col and state_col:
-            loc_df = db[["EIN", "PLAN_NAME", city_col, state_col]].drop_duplicates()
-            loc_df = loc_df.rename(columns={city_col: "City", state_col: "State"})
-            st.dataframe(loc_df, use_container_width=True)
-            st.download_button("Download Locations", loc_df.to_csv(index=False), file_name="plan_locations.csv")
+            # Build DataFrame with all required columns
+            columns = ["EIN", "PLAN_NAME"]
+            if sponsor_col:
+                columns.append(sponsor_col)
+            columns += [city_col, state_col]
+            if retiree_col:
+                columns.append(retiree_col)
+            if total_count_col:
+                columns.append(total_count_col)
+            loc_df = db[columns].drop_duplicates()
+            rename_dict = {city_col: "City", state_col: "State"}
+            if sponsor_col:
+                rename_dict[sponsor_col] = "Plan Sponsor"
+            if retiree_col:
+                rename_dict[retiree_col] = "Retiree Count"
+            if total_count_col:
+                rename_dict[total_count_col] = "Total Count"
+            loc_df = loc_df.rename(columns=rename_dict)
+
+            # Multi-select filter for State
+            all_states = sorted(loc_df["State"].dropna().unique())
+            selected_states = st.multiselect("Filter by State(s)", all_states, default=all_states)
+            filtered_df = loc_df[loc_df["State"].isin(selected_states)]
+
+            st.dataframe(filtered_df, use_container_width=True)
+            st.download_button("Download Locations", filtered_df.to_csv(index=False), file_name="plan_locations.csv")
         else:
             st.warning("City and/or State columns not found in this file.")
 
