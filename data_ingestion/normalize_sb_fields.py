@@ -65,6 +65,11 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
         'TERM_LIABILITY': ['SB_TERM_FNDNG_TGT_AMT', 'TERM_LIABILITY'],
         'TOTAL_LIABILITY': ['SB_TOT_FNDNG_TGT_AMT', 'TOTAL_LIABILITY'],
         'MORTALITY_CODE': ['SB_MORTALITY_TBL_CD', 'MORTALITY_CODE'],
+        # Actuary info fields
+        'ACTUARY_FIRM_NAME': ['SB_ACTUARY_FIRM_NAME', 'ACTUARY_FIRM_NAME'],
+        'ACTUARY_NAME': ['SB_ACTUARY_NAME_LINE', 'ACTUARY_NAME'],
+        'ACTUARY_CITY': ['SB_ACTUARY_US_CITY', 'ACTUARY_CITY'],
+        'ACTUARY_STATE': ['SB_ACTUARY_US_STATE', 'ACTUARY_STATE'],
     }
 
     # Rename columns using canonical mapping (first match)
@@ -133,13 +138,21 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     # MORTALITY_CODE
     out['MORTALITY_CODE'] = get_col(FIELD_MAP['MORTALITY_CODE'], 'str')
 
+    # ACTUARY INFO
+    out['ACTUARY_FIRM_NAME'] = get_col(FIELD_MAP['ACTUARY_FIRM_NAME'], 'str')
+    out['ACTUARY_NAME'] = get_col(FIELD_MAP['ACTUARY_NAME'], 'str')
+    out['ACTUARY_CITY'] = get_col(FIELD_MAP['ACTUARY_CITY'], 'str')
+    out['ACTUARY_STATE'] = get_col(FIELD_MAP['ACTUARY_STATE'], 'str')
+
     # Ensure all required columns exist (fallback to None)
     for col in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT', 'TOTAL_PARTICIPANTS',
-                'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE']:
+                'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
+                'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE']:
         if col not in out.columns:
             out[col] = None
 
     # Output only the normalized schema columns, in order
     schema = ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT',
-              'TOTAL_PARTICIPANTS', 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE']
+              'TOTAL_PARTICIPANTS', 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
+              'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE']
     return out[schema]

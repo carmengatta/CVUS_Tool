@@ -31,7 +31,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Dashboard", "Data Explorer", "About", "Logout"],
+    ["Dashboard", "Actuarial Firms", "Data Explorer", "About", "Logout"],
     index=0,
     key="nav_radio"
 )
@@ -43,7 +43,10 @@ if menu == "Logout":
 # =============================
 # YEAR SELECTION & DATA LOADING
 # =============================
-YEARLY_DIR = "data_output/yearly"
+# Get the directory where this script lives, then go up one level to the project root
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+YEARLY_DIR = os.path.join(PROJECT_ROOT, "data_output", "yearly")
 year_files = [f for f in os.listdir(YEARLY_DIR) if f.startswith("db_plans_") and f.endswith(".parquet")]
 years_available = sorted([
     int(m.group(1))
@@ -190,6 +193,173 @@ if menu == "Dashboard":
             st.download_button("Download Locations", filtered_df.to_csv(index=False), file_name="plan_locations.csv")
         else:
             st.warning("City and/or State columns not found in this file.")
+
+# =============================
+# ACTUARIAL FIRMS PAGE
+# =============================
+elif menu == "Actuarial Firms":
+    st.title(f"Actuarial Firms — {selected_year}")
+    st.caption("View and filter plans by their actuarial firm.")
+    st.markdown("---")
+    
+    # Identify actuary firm column
+    actuary_firm_col = next((c for c in ["ACTUARY_FIRM_NAME", "SB_ACTUARY_FIRM_NAME"] if c in db.columns), None)
+    actuary_name_col = next((c for c in ["ACTUARY_NAME", "SB_ACTUARY_NAME_LINE"] if c in db.columns), None)
+    actuary_city_col = next((c for c in ["ACTUARY_CITY", "SB_ACTUARY_US_CITY"] if c in db.columns), None)
+    actuary_state_col = next((c for c in ["ACTUARY_STATE", "SB_ACTUARY_US_STATE"] if c in db.columns), None)
+    
+    if actuary_firm_col and actuary_firm_col in db.columns:
+        # Clean up firm names for filtering
+        db_firms = db.copy()
+        db_firms[actuary_firm_col] = db_firms[actuary_firm_col].fillna("").astype(str).str.strip()
+        db_firms = db_firms[db_firms[actuary_firm_col] != ""]
+        
+        # Get list of unique firms sorted by plan count
+        firm_counts = db_firms.groupby(actuary_firm_col).size().reset_index(name='Plan Count')
+        firm_counts = firm_counts.sort_values('Plan Count', ascending=False)
+        all_firms = firm_counts[actuary_firm_col].tolist()
+        
+        # KPIs for actuarial firms
+        kpi_cols = st.columns(3)
+        kpi_cols[0].metric("Total Firms", len(all_firms))
+        kpi_cols[1].metric("Plans with Actuary Data", len(db_firms))
+        top_firm = all_firms[0] if all_firms else "N/A"
+        top_firm_count = firm_counts['Plan Count'].iloc[0] if len(firm_counts) > 0 else 0
+        kpi_cols[2].metric("Largest Firm (by # Plans)", f"{top_firm_count:,} plans")
+        
+        st.markdown("---")
+        
+        # Tabs for different views
+        tab1, tab2 = st.tabs(["Browse by Firm", "Firm Rankings"])
+        
+        with tab1:
+            st.subheader("Filter Plans by Actuarial Firm")
+            
+            # Search box for firm name
+            firm_search = st.text_input("Search for actuarial firm (partial name)", key="firm_search")
+            
+            # Filter firms based on search
+            if firm_search:
+                filtered_firms = [f for f in all_firms if firm_search.lower() in f.lower()]
+            else:
+                filtered_firms = all_firms
+            
+            if filtered_firms:
+                # Selectbox to pick a firm
+                selected_firm = st.selectbox(
+                    "Select Actuarial Firm",
+                    options=filtered_firms,
+                    index=0,
+                    key="firm_select"
+                )
+                
+                # Filter data for selected firm
+                firm_data = db_firms[db_firms[actuary_firm_col] == selected_firm]
+                
+                st.markdown(f"### Plans managed by: **{selected_firm}**")
+                st.write(f"Total plans: **{len(firm_data):,}**")
+                
+                # Build display columns
+                display_cols = ["EIN", "PLAN_NAME"]
+                sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in firm_data.columns), None)
+                if sponsor_col:
+                    display_cols.append(sponsor_col)
+                if actuary_name_col and actuary_name_col in firm_data.columns:
+                    display_cols.append(actuary_name_col)
+                if actuary_city_col and actuary_city_col in firm_data.columns:
+                    display_cols.append(actuary_city_col)
+                if actuary_state_col and actuary_state_col in firm_data.columns:
+                    display_cols.append(actuary_state_col)
+                
+                # Add participant/liability columns
+                for col in ["ACTIVE_COUNT", "RETIREE_COUNT", "SEPARATED_COUNT", "TOTAL_PARTICIPANTS", "TOTAL_LIABILITY"]:
+                    if col in firm_data.columns:
+                        display_cols.append(col)
+                
+                # Filter out columns that don't exist
+                display_cols = [c for c in display_cols if c in firm_data.columns]
+                
+                # Rename columns for display
+                rename_map = {
+                    "SPONSOR_DFE_NAME": "Plan Sponsor",
+                    actuary_name_col: "Actuary Name" if actuary_name_col else None,
+                    actuary_city_col: "Actuary City" if actuary_city_col else None,
+                    actuary_state_col: "Actuary State" if actuary_state_col else None,
+                    "ACTIVE_COUNT": "Active",
+                    "RETIREE_COUNT": "Retirees",
+                    "SEPARATED_COUNT": "Terminated",
+                    "TOTAL_PARTICIPANTS": "Total Participants",
+                    "TOTAL_LIABILITY": "Total Liability"
+                }
+                rename_map = {k: v for k, v in rename_map.items() if k and v}
+                
+                display_df = firm_data[display_cols].copy()
+                display_df = display_df.rename(columns=rename_map)
+                
+                st.dataframe(display_df, use_container_width=True)
+                st.download_button(
+                    "Download Plans for This Firm",
+                    display_df.to_csv(index=False),
+                    file_name=f"plans_{selected_firm.replace(' ', '_')[:30]}.csv"
+                )
+                
+                # Summary stats for this firm
+                st.markdown("#### Firm Summary Statistics")
+                sum_cols = st.columns(4)
+                if "TOTAL_PARTICIPANTS" in firm_data.columns:
+                    sum_cols[0].metric("Total Participants", f"{firm_data['TOTAL_PARTICIPANTS'].sum():,.0f}")
+                if "RETIREE_COUNT" in firm_data.columns:
+                    sum_cols[1].metric("Total Retirees", f"{firm_data['RETIREE_COUNT'].sum():,.0f}")
+                if "TOTAL_LIABILITY" in firm_data.columns:
+                    sum_cols[2].metric("Total Liability", f"${firm_data['TOTAL_LIABILITY'].sum():,.0f}")
+                sum_cols[3].metric("Number of Plans", len(firm_data))
+            else:
+                st.warning("No firms found matching your search.")
+        
+        with tab2:
+            st.subheader("Actuarial Firm Rankings")
+            
+            # Build aggregation dictionary - use EIN to count plans, not the groupby column
+            agg_dict = {'EIN': 'count'}  # Count plans by counting EINs
+            if "TOTAL_PARTICIPANTS" in db_firms.columns:
+                agg_dict["TOTAL_PARTICIPANTS"] = "sum"
+            if "RETIREE_COUNT" in db_firms.columns:
+                agg_dict["RETIREE_COUNT"] = "sum"
+            if "TOTAL_LIABILITY" in db_firms.columns:
+                agg_dict["TOTAL_LIABILITY"] = "sum"
+            
+            # Aggregate by firm
+            firm_stats = db_firms.groupby(actuary_firm_col).agg(agg_dict).reset_index()
+            firm_stats = firm_stats.rename(columns={
+                actuary_firm_col: "Actuarial Firm",
+                'EIN': "Plan Count",
+                'TOTAL_PARTICIPANTS': "Total Participants",
+                'RETIREE_COUNT': "Total Retirees",
+                'TOTAL_LIABILITY': "Total Liability ($)"
+            })
+            
+            # Sort options
+            sort_by = st.selectbox(
+                "Sort firms by:",
+                ["Plan Count", "Total Participants", "Total Retirees", "Total Liability ($)"],
+                index=0,
+                key="firm_sort"
+            )
+            
+            if sort_by in firm_stats.columns:
+                firm_stats = firm_stats.sort_values(sort_by, ascending=False)
+            
+            top_n = st.slider("Show top N firms", 10, 100, 25, key="firm_top_n")
+            
+            st.dataframe(firm_stats.head(top_n), use_container_width=True)
+            st.download_button(
+                "Download Firm Rankings",
+                firm_stats.to_csv(index=False),
+                file_name="actuarial_firm_rankings.csv"
+            )
+    else:
+        st.warning("Actuarial firm data (ACTUARY_FIRM_NAME) not found in this dataset. Please re-run the data pipeline to include this field.")
+        st.info("The ACTUARY_FIRM_NAME field comes from Schedule SB and needs to be included in the data normalization process.")
 
 # =============================
 # DATA EXPLORER PAGE
