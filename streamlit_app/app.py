@@ -31,7 +31,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Dashboard", "Actuarial Firms", "Data Explorer", "About", "Logout"],
+    ["Dashboard", "Substitute Mortality", "Actuarial Firms", "Data Explorer", "About", "Logout"],
     index=0,
     key="nav_radio"
 )
@@ -193,6 +193,238 @@ if menu == "Dashboard":
             st.download_button("Download Locations", filtered_df.to_csv(index=False), file_name="plan_locations.csv")
         else:
             st.warning("City and/or State columns not found in this file.")
+
+# =============================
+# SUBSTITUTE MORTALITY PAGE
+# =============================
+elif menu == "Substitute Mortality":
+    st.title(f"Substitute Mortality Analysis — {selected_year}")
+    st.caption("Analysis of mortality table codes from Schedule SB filings.")
+    st.markdown("""
+    **Mortality Table Codes (SB_MORTALITY_TBL_CD):**
+    - **Code 1:** Small plan exception (simplified mortality)
+    - **Code 2:** Prescribed IRS mortality tables (standard)
+    - **Code 3:** Substitute mortality tables (plan-specific, IRS-approved)
+    """)
+    st.markdown("---")
+    
+    # Identify the mortality code column
+    mortality_col = next((c for c in ["MORTALITY_CODE", "SB_MORTALITY_TBL_CD"] if c in db.columns), None)
+    
+    if mortality_col and mortality_col in db.columns:
+        # Clean up mortality codes
+        db_mort = db.copy()
+        db_mort[mortality_col] = pd.to_numeric(db_mort[mortality_col], errors='coerce')
+        
+        # Filter to valid codes (1, 2, 3)
+        db_mort_valid = db_mort[db_mort[mortality_col].isin([1, 2, 3])].copy()
+        
+        # Define labels for the codes
+        code_labels = {
+            1: "Small Plan Exception",
+            2: "Prescribed (Standard)",
+            3: "Substitute Mortality"
+        }
+        db_mort_valid["Mortality Type"] = db_mort_valid[mortality_col].map(code_labels)
+        
+        # --- KPIs ---
+        total_with_code = len(db_mort_valid)
+        code_1_count = len(db_mort_valid[db_mort_valid[mortality_col] == 1])
+        code_2_count = len(db_mort_valid[db_mort_valid[mortality_col] == 2])
+        code_3_count = len(db_mort_valid[db_mort_valid[mortality_col] == 3])
+        
+        kpi_cols = st.columns(4)
+        kpi_cols[0].metric("Plans with Mortality Data", f"{total_with_code:,}")
+        kpi_cols[1].metric("Small Plan Exception (1)", f"{code_1_count:,}")
+        kpi_cols[2].metric("Prescribed Tables (2)", f"{code_2_count:,}")
+        kpi_cols[3].metric("Substitute Mortality (3)", f"{code_3_count:,}")
+        
+        st.markdown("---")
+        
+        # Percentage breakdown
+        if total_with_code > 0:
+            pct_1 = (code_1_count / total_with_code) * 100
+            pct_2 = (code_2_count / total_with_code) * 100
+            pct_3 = (code_3_count / total_with_code) * 100
+            
+            st.subheader("Distribution by Plan Count")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Small Plan %", f"{pct_1:.1f}%")
+            col2.metric("Prescribed %", f"{pct_2:.1f}%")
+            col3.metric("Substitute %", f"{pct_3:.1f}%")
+            
+            # Aggregate by retirees and liability for substitute mortality
+            retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db_mort_valid.columns else None
+            liability_col = next((c for c in ["TOTAL_LIABILITY", "LIABILITY_TOTAL"] if c in db_mort_valid.columns), None)
+            
+            if retiree_col or liability_col:
+                st.markdown("---")
+                st.subheader("Substitute Mortality Impact (Code 3)")
+                
+                substitute_plans = db_mort_valid[db_mort_valid[mortality_col] == 3]
+                prescribed_plans = db_mort_valid[db_mort_valid[mortality_col] == 2]
+                
+                impact_cols = st.columns(4)
+                
+                if retiree_col:
+                    sub_retirees = substitute_plans[retiree_col].sum()
+                    presc_retirees = prescribed_plans[retiree_col].sum()
+                    total_retirees = db_mort_valid[retiree_col].sum()
+                    pct_retirees_sub = (sub_retirees / total_retirees * 100) if total_retirees > 0 else 0
+                    impact_cols[0].metric("Retirees (Substitute)", f"{sub_retirees:,.0f}")
+                    impact_cols[1].metric("% of All Retirees", f"{pct_retirees_sub:.1f}%")
+                
+                if liability_col:
+                    sub_liability = substitute_plans[liability_col].sum()
+                    presc_liability = prescribed_plans[liability_col].sum()
+                    total_liability = db_mort_valid[liability_col].sum()
+                    pct_liability_sub = (sub_liability / total_liability * 100) if total_liability > 0 else 0
+                    impact_cols[2].metric("Liability (Substitute)", f"${sub_liability:,.0f}")
+                    impact_cols[3].metric("% of Total Liability", f"{pct_liability_sub:.1f}%")
+        
+        st.markdown("---")
+        
+        # Tabs for different views
+        tab1, tab2, tab3 = st.tabs(["Substitute Mortality Plans", "By Actuarial Firm", "Summary Table"])
+        
+        with tab1:
+            st.subheader("Plans Using Substitute Mortality (Code 3)")
+            
+            substitute_plans = db_mort_valid[db_mort_valid[mortality_col] == 3].copy()
+            
+            if len(substitute_plans) > 0:
+                # Build display columns
+                display_cols = ["EIN", "PLAN_NAME"]
+                sponsor_col = next((c for c in ["SPONSOR_DFE_NAME", "SPONSOR_NAME"] if c in substitute_plans.columns), None)
+                if sponsor_col:
+                    display_cols.insert(1, sponsor_col)
+                
+                actuary_firm_col = next((c for c in ["ACTUARY_FIRM_NAME", "SB_ACTUARY_FIRM_NAME"] if c in substitute_plans.columns), None)
+                if actuary_firm_col:
+                    display_cols.append(actuary_firm_col)
+                
+                for col in ["ACTIVE_COUNT", "RETIREE_COUNT", "SEPARATED_COUNT", "TOTAL_PARTICIPANTS"]:
+                    if col in substitute_plans.columns:
+                        display_cols.append(col)
+                
+                if liability_col:
+                    display_cols.append(liability_col)
+                
+                # Filter to existing columns
+                display_cols = [c for c in display_cols if c in substitute_plans.columns]
+                
+                # Sort options
+                sort_by = st.selectbox(
+                    "Sort by:",
+                    ["RETIREE_COUNT", "TOTAL_PARTICIPANTS", liability_col, "PLAN_NAME"] if liability_col else ["RETIREE_COUNT", "TOTAL_PARTICIPANTS", "PLAN_NAME"],
+                    index=0,
+                    key="sub_mort_sort"
+                )
+                
+                if sort_by and sort_by in substitute_plans.columns:
+                    substitute_plans = substitute_plans.sort_values(sort_by, ascending=False)
+                
+                top_n = st.slider("Show top N plans", 10, 200, 50, key="sub_mort_top_n")
+                
+                # Rename for display
+                rename_map = {
+                    "SPONSOR_DFE_NAME": "Plan Sponsor",
+                    "ACTUARY_FIRM_NAME": "Actuarial Firm",
+                    "SB_ACTUARY_FIRM_NAME": "Actuarial Firm",
+                    "ACTIVE_COUNT": "Active",
+                    "RETIREE_COUNT": "Retirees",
+                    "SEPARATED_COUNT": "Terminated",
+                    "TOTAL_PARTICIPANTS": "Total Participants",
+                    "TOTAL_LIABILITY": "Total Liability",
+                    "LIABILITY_TOTAL": "Total Liability"
+                }
+                
+                display_df = substitute_plans[display_cols].head(top_n).copy()
+                display_df = display_df.rename(columns={k: v for k, v in rename_map.items() if k in display_df.columns})
+                
+                st.write(f"**{len(substitute_plans):,} plans** use substitute mortality tables.")
+                st.dataframe(display_df, use_container_width=True)
+                st.download_button(
+                    "Download Substitute Mortality Plans",
+                    substitute_plans[display_cols].to_csv(index=False),
+                    file_name=f"substitute_mortality_plans_{selected_year}.csv"
+                )
+            else:
+                st.info("No plans with substitute mortality (Code 3) found for this year.")
+        
+        with tab2:
+            st.subheader("Substitute Mortality by Actuarial Firm")
+            
+            actuary_firm_col = next((c for c in ["ACTUARY_FIRM_NAME", "SB_ACTUARY_FIRM_NAME"] if c in db_mort_valid.columns), None)
+            
+            if actuary_firm_col:
+                substitute_plans = db_mort_valid[db_mort_valid[mortality_col] == 3].copy()
+                substitute_plans[actuary_firm_col] = substitute_plans[actuary_firm_col].fillna("Unknown").astype(str).str.strip()
+                substitute_plans = substitute_plans[substitute_plans[actuary_firm_col] != ""]
+                
+                if len(substitute_plans) > 0:
+                    # Aggregate by firm
+                    agg_dict = {"EIN": "count"}
+                    if retiree_col:
+                        agg_dict[retiree_col] = "sum"
+                    if liability_col:
+                        agg_dict[liability_col] = "sum"
+                    
+                    firm_summary = substitute_plans.groupby(actuary_firm_col).agg(agg_dict).reset_index()
+                    firm_summary = firm_summary.rename(columns={
+                        actuary_firm_col: "Actuarial Firm",
+                        "EIN": "# Plans (Substitute)",
+                        retiree_col: "Total Retirees" if retiree_col else None,
+                        liability_col: "Total Liability ($)" if liability_col else None
+                    })
+                    firm_summary = firm_summary.sort_values("# Plans (Substitute)", ascending=False)
+                    
+                    st.write(f"**{len(firm_summary):,} actuarial firms** have clients using substitute mortality.")
+                    st.dataframe(firm_summary, use_container_width=True)
+                    st.download_button(
+                        "Download Firm Summary",
+                        firm_summary.to_csv(index=False),
+                        file_name=f"substitute_mortality_by_firm_{selected_year}.csv"
+                    )
+                else:
+                    st.info("No substitute mortality plans with actuarial firm data.")
+            else:
+                st.warning("Actuarial firm column not found in the dataset.")
+        
+        with tab3:
+            st.subheader("Summary by Mortality Code")
+            
+            # Build summary table
+            summary_data = []
+            for code, label in code_labels.items():
+                code_df = db_mort_valid[db_mort_valid[mortality_col] == code]
+                row = {
+                    "Code": code,
+                    "Description": label,
+                    "# Plans": len(code_df),
+                    "% of Plans": f"{len(code_df) / total_with_code * 100:.1f}%" if total_with_code > 0 else "N/A"
+                }
+                if retiree_col:
+                    row["Total Retirees"] = code_df[retiree_col].sum()
+                if liability_col:
+                    row["Total Liability"] = code_df[liability_col].sum()
+                summary_data.append(row)
+            
+            summary_df = pd.DataFrame(summary_data)
+            st.dataframe(summary_df, use_container_width=True)
+            st.download_button(
+                "Download Summary",
+                summary_df.to_csv(index=False),
+                file_name=f"mortality_code_summary_{selected_year}.csv"
+            )
+            
+            # Show plans without mortality code
+            missing_code = db[~db.index.isin(db_mort_valid.index)]
+            st.markdown("---")
+            st.write(f"**{len(missing_code):,} plans** have missing or invalid mortality code data.")
+    else:
+        st.warning("Mortality code column (MORTALITY_CODE or SB_MORTALITY_TBL_CD) not found in this dataset.")
+        st.info("Ensure the data pipeline includes the SB_MORTALITY_TBL_CD field from Schedule SB filings.")
 
 # =============================
 # ACTUARIAL FIRMS PAGE
