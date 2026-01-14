@@ -37,7 +37,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Dashboard", "Substitute Mortality", "Actuarial Firms", "Data Explorer", "About", "Logout"],
+    ["Dashboard", "Substitute Mortality", "Industry Explorer", "Actuarial Firms", "Data Explorer", "About", "Logout"],
     index=0,
     key="nav_radio"
 )
