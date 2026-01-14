@@ -517,6 +517,204 @@ elif menu == "Substitute Mortality":
         st.info("Ensure the data pipeline includes the SB_MORTALITY_TBL_CD field from Schedule SB filings.")
 
 # =============================
+# INDUSTRY EXPLORER PAGE
+# =============================
+elif menu == "Industry Explorer":
+    st.title(f"Industry Explorer — {selected_year}")
+    st.caption("Explore DB plans by industry sector, NAICS code, and mortality table usage.")
+    st.markdown("---")
+    
+    # Add industry classification to data
+    if "BUSINESS_CODE" in db.columns:
+        db_ind = db.copy()
+        db_ind["INDUSTRY_SECTOR"] = db_ind["BUSINESS_CODE"].astype(str).apply(get_naics_sector)
+        db_ind["INDUSTRY_NAME"] = db_ind["BUSINESS_CODE"].astype(str).apply(get_naics_description)
+        db_ind["MORTALITY_CODE"] = pd.to_numeric(db_ind.get("MORTALITY_CODE", pd.Series()), errors='coerce')
+        
+        # Mortality code labels
+        mortality_labels = {1: "Prescribed Combined", 2: "Prescribed Separate", 3: "Substitute"}
+        db_ind["MORTALITY_TYPE"] = db_ind["MORTALITY_CODE"].map(mortality_labels).fillna("Unknown")
+        
+        # --- Filters in sidebar ---
+        st.sidebar.markdown("## Industry Filters")
+        
+        # Sector filter
+        all_sectors = sorted(db_ind["INDUSTRY_SECTOR"].dropna().unique())
+        selected_sectors = st.sidebar.multiselect(
+            "Industry Sector(s)",
+            options=all_sectors,
+            default=[],
+            help="Filter by broad industry sector"
+        )
+        
+        # Mortality code filter
+        mortality_options = ["All", "Prescribed Combined (1)", "Prescribed Separate (2)", "Substitute (3)", "Not Substitute (1 or 2)"]
+        selected_mortality = st.sidebar.selectbox(
+            "Mortality Table Type",
+            options=mortality_options,
+            index=0,
+            help="Filter by mortality table usage"
+        )
+        
+        # Apply filters
+        filtered = db_ind.copy()
+        
+        if selected_sectors:
+            filtered = filtered[filtered["INDUSTRY_SECTOR"].isin(selected_sectors)]
+        
+        if selected_mortality == "Prescribed Combined (1)":
+            filtered = filtered[filtered["MORTALITY_CODE"] == 1]
+        elif selected_mortality == "Prescribed Separate (2)":
+            filtered = filtered[filtered["MORTALITY_CODE"] == 2]
+        elif selected_mortality == "Substitute (3)":
+            filtered = filtered[filtered["MORTALITY_CODE"] == 3]
+        elif selected_mortality == "Not Substitute (1 or 2)":
+            filtered = filtered[filtered["MORTALITY_CODE"].isin([1, 2])]
+        
+        # --- KPIs ---
+        kpi_cols = st.columns(4)
+        kpi_cols[0].metric("Plans", f"{len(filtered):,}")
+        
+        retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in filtered.columns else None
+        if retiree_col:
+            kpi_cols[1].metric("Total Retirees", f"{filtered[retiree_col].sum():,.0f}")
+        
+        liability_col = next((c for c in ["TOTAL_LIABILITY", "LIABILITY_TOTAL"] if c in filtered.columns), None)
+        if liability_col:
+            kpi_cols[2].metric("Total Liability", f"${filtered[liability_col].sum():,.0f}")
+        
+        participant_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in filtered.columns else None
+        if participant_col:
+            kpi_cols[3].metric("Total Participants", f"{filtered[participant_col].sum():,.0f}")
+        
+        st.markdown("---")
+        
+        # Tabs for different views
+        tab1, tab2, tab3 = st.tabs(["Plan List", "By Industry Sector", "By Actuarial Firm"])
+        
+        with tab1:
+            st.subheader("Filtered Plan List")
+            
+            # Build display columns
+            display_cols = ["EIN", "SPONSOR_DFE_NAME", "PLAN_NAME", "INDUSTRY_SECTOR", "INDUSTRY_NAME", "MORTALITY_TYPE"]
+            
+            actuary_col = next((c for c in ["ACTUARY_FIRM_NAME", "SB_ACTUARY_FIRM_NAME"] if c in filtered.columns), None)
+            if actuary_col:
+                display_cols.append(actuary_col)
+            
+            for col in ["ACTIVE_COUNT", "RETIREE_COUNT", "TOTAL_PARTICIPANTS"]:
+                if col in filtered.columns:
+                    display_cols.append(col)
+            
+            if liability_col:
+                display_cols.append(liability_col)
+            
+            display_cols = [c for c in display_cols if c in filtered.columns]
+            
+            # Sort options
+            sort_options = ["RETIREE_COUNT", "TOTAL_PARTICIPANTS", "TOTAL_LIABILITY", "SPONSOR_DFE_NAME"]
+            sort_options = [s for s in sort_options if s in filtered.columns]
+            sort_by = st.selectbox("Sort by:", sort_options, index=0, key="ind_exp_sort")
+            
+            if sort_by in filtered.columns:
+                filtered_sorted = filtered.sort_values(sort_by, ascending=False)
+            else:
+                filtered_sorted = filtered
+            
+            top_n = st.slider("Show top N plans", 25, 500, 100, key="ind_exp_top_n")
+            
+            # Rename for display
+            rename_map = {
+                "SPONSOR_DFE_NAME": "Plan Sponsor",
+                "INDUSTRY_SECTOR": "Sector",
+                "INDUSTRY_NAME": "Industry",
+                "MORTALITY_TYPE": "Mortality",
+                "ACTUARY_FIRM_NAME": "Actuarial Firm",
+                "SB_ACTUARY_FIRM_NAME": "Actuarial Firm",
+                "ACTIVE_COUNT": "Active",
+                "RETIREE_COUNT": "Retirees",
+                "TOTAL_PARTICIPANTS": "Total",
+                "TOTAL_LIABILITY": "Liability",
+                "LIABILITY_TOTAL": "Liability"
+            }
+            
+            display_df = filtered_sorted[display_cols].head(top_n).copy()
+            display_df = display_df.rename(columns={k: v for k, v in rename_map.items() if k in display_df.columns})
+            
+            st.write(f"Showing **{min(top_n, len(filtered)):,}** of **{len(filtered):,}** plans")
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Download button
+            st.download_button(
+                "Download Filtered Plans (CSV)",
+                filtered_sorted[display_cols].to_csv(index=False),
+                file_name=f"industry_filtered_plans_{selected_year}.csv"
+            )
+        
+        with tab2:
+            st.subheader("Summary by Industry Sector")
+            
+            agg_dict = {"EIN": "count"}
+            if retiree_col:
+                agg_dict[retiree_col] = "sum"
+            if liability_col:
+                agg_dict[liability_col] = "sum"
+            
+            sector_summary = filtered.groupby("INDUSTRY_SECTOR").agg(agg_dict).reset_index()
+            sector_summary = sector_summary.rename(columns={
+                "INDUSTRY_SECTOR": "Industry Sector",
+                "EIN": "# Plans",
+                retiree_col: "Total Retirees" if retiree_col else None,
+                liability_col: "Total Liability" if liability_col else None
+            })
+            sector_summary = sector_summary.sort_values("# Plans", ascending=False)
+            
+            st.dataframe(sector_summary, use_container_width=True)
+            
+            # Show mortality breakdown by sector if filtering by sector
+            if selected_sectors:
+                st.markdown("---")
+                st.subheader("Mortality Code Breakdown")
+                
+                mort_by_sector = filtered.groupby(["INDUSTRY_SECTOR", "MORTALITY_TYPE"]).agg({"EIN": "count"}).reset_index()
+                mort_by_sector = mort_by_sector.rename(columns={"EIN": "# Plans"})
+                mort_pivot = mort_by_sector.pivot(index="INDUSTRY_SECTOR", columns="MORTALITY_TYPE", values="# Plans").fillna(0)
+                st.dataframe(mort_pivot, use_container_width=True)
+        
+        with tab3:
+            st.subheader("By Actuarial Firm")
+            
+            if actuary_col:
+                # Normalize firm names
+                filtered["NORMALIZED_FIRM"] = filtered[actuary_col].apply(normalize_firm_name)
+                
+                agg_dict = {"EIN": "count"}
+                if retiree_col:
+                    agg_dict[retiree_col] = "sum"
+                if liability_col:
+                    agg_dict[liability_col] = "sum"
+                
+                firm_summary = filtered.groupby("NORMALIZED_FIRM").agg(agg_dict).reset_index()
+                firm_summary = firm_summary.rename(columns={
+                    "NORMALIZED_FIRM": "Actuarial Firm",
+                    "EIN": "# Plans",
+                    retiree_col: "Total Retirees" if retiree_col else None,
+                    liability_col: "Total Liability" if liability_col else None
+                })
+                firm_summary = firm_summary.sort_values("Total Retirees" if retiree_col else "# Plans", ascending=False)
+                
+                st.dataframe(firm_summary.head(30), use_container_width=True)
+                st.download_button(
+                    "Download Firm Summary",
+                    firm_summary.to_csv(index=False),
+                    file_name=f"industry_by_firm_{selected_year}.csv"
+                )
+            else:
+                st.warning("Actuarial firm data not available.")
+    else:
+        st.warning("BUSINESS_CODE column not found in the dataset.")
+
+# =============================
 # ACTUARIAL FIRMS PAGE
 # =============================
 elif menu == "Actuarial Firms":
