@@ -3,6 +3,12 @@ import streamlit as st
 import pandas as pd
 import os
 import re
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.normalize_firm_names import normalize_firm_name
+from utils.naics_codes import get_naics_sector, get_naics_description
 
 # =============================
 # SIMPLE PASSWORD PROTECTION
@@ -202,9 +208,9 @@ elif menu == "Substitute Mortality":
     st.caption("Analysis of mortality table codes from Schedule SB filings.")
     st.markdown("""
     **Mortality Table Codes (SB_MORTALITY_TBL_CD):**
-    - **Code 1:** Small plan exception (simplified mortality)
-    - **Code 2:** Prescribed IRS mortality tables (standard)
-    - **Code 3:** Substitute mortality tables (plan-specific, IRS-approved)
+    - **Code 1 — Prescribed Combined:** Uses the IRS-prescribed unisex mortality table (male and female blended) with the applicable improvement scale.
+    - **Code 2 — Prescribed Separate:** Uses the IRS-prescribed mortality tables with separate male and female rates, projected with the applicable improvement scale.
+    - **Code 3 — Substitute:** Uses a plan-specific, credibility-based mortality table approved by the IRS in lieu of the standard prescribed tables.
     """)
     st.markdown("---")
     
@@ -221,9 +227,9 @@ elif menu == "Substitute Mortality":
         
         # Define labels for the codes
         code_labels = {
-            1: "Small Plan Exception",
-            2: "Prescribed (Standard)",
-            3: "Substitute Mortality"
+            1: "Prescribed Combined",
+            2: "Prescribed Separate",
+            3: "Substitute"
         }
         db_mort_valid["Mortality Type"] = db_mort_valid[mortality_col].map(code_labels)
         
@@ -235,9 +241,9 @@ elif menu == "Substitute Mortality":
         
         kpi_cols = st.columns(4)
         kpi_cols[0].metric("Plans with Mortality Data", f"{total_with_code:,}")
-        kpi_cols[1].metric("Small Plan Exception (1)", f"{code_1_count:,}")
-        kpi_cols[2].metric("Prescribed Tables (2)", f"{code_2_count:,}")
-        kpi_cols[3].metric("Substitute Mortality (3)", f"{code_3_count:,}")
+        kpi_cols[1].metric("Prescribed Combined (1)", f"{code_1_count:,}")
+        kpi_cols[2].metric("Prescribed Separate (2)", f"{code_2_count:,}")
+        kpi_cols[3].metric("Substitute (3)", f"{code_3_count:,}")
         
         st.markdown("---")
         
@@ -249,8 +255,8 @@ elif menu == "Substitute Mortality":
             
             st.subheader("Distribution by Plan Count")
             col1, col2, col3 = st.columns(3)
-            col1.metric("Small Plan %", f"{pct_1:.1f}%")
-            col2.metric("Prescribed %", f"{pct_2:.1f}%")
+            col1.metric("Prescribed Combined %", f"{pct_1:.1f}%")
+            col2.metric("Prescribed Separate %", f"{pct_2:.1f}%")
             col3.metric("Substitute %", f"{pct_3:.1f}%")
             
             # Aggregate by retirees and liability for substitute mortality
@@ -282,10 +288,15 @@ elif menu == "Substitute Mortality":
                     impact_cols[2].metric("Liability (Substitute)", f"${sub_liability:,.0f}")
                     impact_cols[3].metric("% of Total Liability", f"{pct_liability_sub:.1f}%")
         
+        # Add industry classification to the data
+        if "BUSINESS_CODE" in db_mort_valid.columns:
+            db_mort_valid["INDUSTRY_SECTOR"] = db_mort_valid["BUSINESS_CODE"].astype(str).apply(get_naics_sector)
+            db_mort_valid["INDUSTRY_NAME"] = db_mort_valid["BUSINESS_CODE"].astype(str).apply(get_naics_description)
+        
         st.markdown("---")
         
         # Tabs for different views
-        tab1, tab2, tab3 = st.tabs(["Substitute Mortality Plans", "By Actuarial Firm", "Summary Table"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Substitute Mortality Plans", "By Industry", "By Actuarial Firm", "Summary Table"])
         
         with tab1:
             st.subheader("Plans Using Substitute Mortality (Code 3)")
@@ -353,6 +364,85 @@ elif menu == "Substitute Mortality":
                 st.info("No plans with substitute mortality (Code 3) found for this year.")
         
         with tab2:
+            st.subheader("Substitute Mortality by Industry")
+            
+            if "INDUSTRY_SECTOR" in db_mort_valid.columns:
+                substitute_plans = db_mort_valid[db_mort_valid[mortality_col] == 3].copy()
+                
+                if len(substitute_plans) > 0:
+                    # --- By Sector ---
+                    st.markdown("#### By Industry Sector")
+                    agg_dict_sector = {"EIN": "count"}
+                    if retiree_col:
+                        agg_dict_sector[retiree_col] = "sum"
+                    if liability_col:
+                        agg_dict_sector[liability_col] = "sum"
+                    
+                    sector_summary = substitute_plans.groupby("INDUSTRY_SECTOR").agg(agg_dict_sector).reset_index()
+                    sector_summary = sector_summary.rename(columns={
+                        "INDUSTRY_SECTOR": "Industry Sector",
+                        "EIN": "# Plans",
+                        retiree_col: "Total Retirees" if retiree_col else None,
+                        liability_col: "Total Liability ($)" if liability_col else None
+                    })
+                    sector_summary = sector_summary.sort_values("# Plans", ascending=False)
+                    
+                    st.dataframe(sector_summary, use_container_width=True)
+                    
+                    # --- By Detailed Industry ---
+                    st.markdown("---")
+                    st.markdown("#### By Detailed Industry (NAICS)")
+                    
+                    agg_dict_ind = {"EIN": "count"}
+                    if retiree_col:
+                        agg_dict_ind[retiree_col] = "sum"
+                    if liability_col:
+                        agg_dict_ind[liability_col] = "sum"
+                    
+                    industry_summary = substitute_plans.groupby(["BUSINESS_CODE", "INDUSTRY_NAME"]).agg(agg_dict_ind).reset_index()
+                    industry_summary = industry_summary.rename(columns={
+                        "BUSINESS_CODE": "NAICS Code",
+                        "INDUSTRY_NAME": "Industry",
+                        "EIN": "# Plans",
+                        retiree_col: "Total Retirees" if retiree_col else None,
+                        liability_col: "Total Liability ($)" if liability_col else None
+                    })
+                    industry_summary = industry_summary.sort_values("# Plans", ascending=False)
+                    
+                    st.dataframe(industry_summary.head(25), use_container_width=True)
+                    st.download_button(
+                        "Download Industry Analysis",
+                        industry_summary.to_csv(index=False),
+                        file_name=f"substitute_mortality_by_industry_{selected_year}.csv"
+                    )
+                    
+                    # --- Compare to overall population ---
+                    st.markdown("---")
+                    st.markdown("#### Substitute Mortality Rate by Sector")
+                    st.caption("Percentage of plans in each sector using substitute mortality vs prescribed tables")
+                    
+                    # Get all plans with valid mortality code by sector
+                    all_by_sector = db_mort_valid.groupby("INDUSTRY_SECTOR").agg({"EIN": "count"}).reset_index()
+                    all_by_sector = all_by_sector.rename(columns={"EIN": "Total Plans"})
+                    
+                    # Get substitute plans by sector
+                    sub_by_sector = substitute_plans.groupby("INDUSTRY_SECTOR").agg({"EIN": "count"}).reset_index()
+                    sub_by_sector = sub_by_sector.rename(columns={"EIN": "Substitute Plans"})
+                    
+                    # Merge
+                    comparison = all_by_sector.merge(sub_by_sector, on="INDUSTRY_SECTOR", how="left")
+                    comparison["Substitute Plans"] = comparison["Substitute Plans"].fillna(0).astype(int)
+                    comparison["% Using Substitute"] = (comparison["Substitute Plans"] / comparison["Total Plans"] * 100).round(1)
+                    comparison = comparison.rename(columns={"INDUSTRY_SECTOR": "Industry Sector"})
+                    comparison = comparison.sort_values("% Using Substitute", ascending=False)
+                    
+                    st.dataframe(comparison, use_container_width=True)
+                else:
+                    st.info("No plans with substitute mortality (Code 3) found for this year.")
+            else:
+                st.warning("BUSINESS_CODE column not found in the dataset.")
+        
+        with tab3:
             st.subheader("Substitute Mortality by Actuarial Firm")
             
             actuary_firm_col = next((c for c in ["ACTUARY_FIRM_NAME", "SB_ACTUARY_FIRM_NAME"] if c in db_mort_valid.columns), None)
@@ -391,7 +481,7 @@ elif menu == "Substitute Mortality":
             else:
                 st.warning("Actuarial firm column not found in the dataset.")
         
-        with tab3:
+        with tab4:
             st.subheader("Summary by Mortality Code")
             
             # Build summary table
@@ -446,10 +536,22 @@ elif menu == "Actuarial Firms":
         db_firms[actuary_firm_col] = db_firms[actuary_firm_col].fillna("").astype(str).str.strip()
         db_firms = db_firms[db_firms[actuary_firm_col] != ""]
         
+        # Store original firm names for reference
+        db_firms["ORIGINAL_FIRM_NAME"] = db_firms[actuary_firm_col]
+        
+        # Apply firm name normalization to consolidate variations
+        db_firms["NORMALIZED_FIRM"] = db_firms[actuary_firm_col].apply(normalize_firm_name)
+        
+        # Toggle for normalized vs raw view
+        use_normalized = st.sidebar.checkbox("Consolidate firm name variations", value=True, 
+                                              help="Combines variations like 'AON CONSULTING INC' and 'AON CONSULTING, INC.' into a single entry")
+        
+        firm_col_to_use = "NORMALIZED_FIRM" if use_normalized else actuary_firm_col
+        
         # Get list of unique firms sorted by plan count
-        firm_counts = db_firms.groupby(actuary_firm_col).size().reset_index(name='Plan Count')
+        firm_counts = db_firms.groupby(firm_col_to_use).size().reset_index(name='Plan Count')
         firm_counts = firm_counts.sort_values('Plan Count', ascending=False)
-        all_firms = firm_counts[actuary_firm_col].tolist()
+        all_firms = firm_counts[firm_col_to_use].tolist()
         
         # KPIs for actuarial firms
         kpi_cols = st.columns(3)
@@ -485,8 +587,8 @@ elif menu == "Actuarial Firms":
                     key="firm_select"
                 )
                 
-                # Filter data for selected firm
-                firm_data = db_firms[db_firms[actuary_firm_col] == selected_firm]
+                # Filter data for selected firm (use the appropriate column based on toggle)
+                firm_data = db_firms[db_firms[firm_col_to_use] == selected_firm]
                 
                 st.markdown(f"### Plans managed by: **{selected_firm}**")
                 st.write(f"Total plans: **{len(firm_data):,}**")
@@ -560,10 +662,10 @@ elif menu == "Actuarial Firms":
             if "TOTAL_LIABILITY" in db_firms.columns:
                 agg_dict["TOTAL_LIABILITY"] = "sum"
             
-            # Aggregate by firm
-            firm_stats = db_firms.groupby(actuary_firm_col).agg(agg_dict).reset_index()
+            # Aggregate by firm (use normalized or raw based on toggle)
+            firm_stats = db_firms.groupby(firm_col_to_use).agg(agg_dict).reset_index()
             firm_stats = firm_stats.rename(columns={
-                actuary_firm_col: "Actuarial Firm",
+                firm_col_to_use: "Actuarial Firm",
                 'EIN': "Plan Count",
                 'TOTAL_PARTICIPANTS': "Total Participants",
                 'RETIREE_COUNT': "Total Retirees",
