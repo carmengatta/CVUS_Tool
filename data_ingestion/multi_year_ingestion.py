@@ -20,8 +20,10 @@ import pandas as pd
 from .load_csv import load_csv
 from .normalize_sb_fields import normalize_sb_fields
 from .normalize_sr_fields import normalize_sr_fields
+from .normalize_sch_h_fields import load_and_normalize_sch_h
 from .merge_sb_5500 import merge_sb_5500
 from .merge_sb_sr import merge_sb_sr
+from .merge_schedule_h import merge_schedule_h, add_prt_analysis_fields
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "data_raw")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "data_output", "yearly")
@@ -31,17 +33,23 @@ YEARS = list(range(2019, 2025))
 SB_PREFIX = "F_SCH_SB_"
 F5500_PREFIX = "F_5500_"
 SR_PREFIX = "F_SCH_R_"
+SCH_H_PREFIX = "F_SCH_H_"
 
 SB_TERM_PARTCP_CNT = "SB_TERM_PARTCP_CNT"
 
-def process_year(year: int) -> pd.DataFrame:
+def process_year(year: int, include_schedule_h: bool = True) -> pd.DataFrame:
     """
     Process a single year: load, normalize, merge, validate, and return merged DataFrame.
+    
+    Args:
+        year: Year to process
+        include_schedule_h: Whether to include Schedule H data (PRT, assets)
     """
     # Filepaths
     sb_path = os.path.join(RAW_DIR, f"{SB_PREFIX}{year}_latest.csv")
     f5500_path = os.path.join(RAW_DIR, f"{F5500_PREFIX}{year}_latest.csv")
     sr_path = os.path.join(RAW_DIR, f"{SR_PREFIX}{year}_latest.csv")
+    sch_h_path = os.path.join(RAW_DIR, f"{SCH_H_PREFIX}{year}_latest.csv")
 
     # Load
     sb = load_csv(sb_path, year)
@@ -61,6 +69,14 @@ def process_year(year: int) -> pd.DataFrame:
 
     # Merge SB ↔ SR with ACK_ID fallback logic
     merged_sr = merge_sb_sr(merged, sr)
+
+    # Merge Schedule H (PRT and asset data) if available
+    if include_schedule_h and os.path.exists(sch_h_path):
+        sch_h = load_and_normalize_sch_h(sch_h_path, year=year)
+        if not sch_h.empty:
+            merged_sr = merge_schedule_h(merged_sr, sch_h)
+            merged_sr = add_prt_analysis_fields(merged_sr)
+            print(f"[Year {year}] Schedule H merged: {(merged_sr['SCH_H_TOTAL_ASSETS_EOY'].notna()).sum()} plans with asset data")
 
     # Add TRACKING_ID
     merged_sr["TRACKING_ID"] = merged_sr["EIN"].astype(str) + "-" + merged_sr["PLAN_NUMBER"].astype(str)

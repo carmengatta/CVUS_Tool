@@ -37,7 +37,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Dashboard", "Substitute Mortality", "Industry Explorer", "Actuarial Firms", "Data Explorer", "About", "Logout"],
+    ["Dashboard", "Substitute Mortality", "Industry Explorer", "PRT Analysis", "PRT History", "Actuarial Firms", "Data Explorer", "About", "Logout"],
     index=0,
     key="nav_radio"
 )
@@ -713,6 +713,734 @@ elif menu == "Industry Explorer":
                 st.warning("Actuarial firm data not available.")
     else:
         st.warning("BUSINESS_CODE column not found in the dataset.")
+
+# =============================
+# PRT ANALYSIS PAGE
+# =============================
+elif menu == "PRT Analysis":
+    st.title(f"Pension Risk Transfer Analysis — {selected_year}")
+    st.caption("Analyze PRT transactions and identify plans ripe for pension risk transfer.")
+    st.markdown("---")
+    
+    # Check if Schedule H data is available
+    has_prt_data = 'SCH_H_PRT_AMOUNT' in db.columns
+    
+    if not has_prt_data:
+        st.warning("""
+        ⚠️ **Schedule H data not yet loaded for this year.**
+        
+        To enable PRT analysis, re-run the data pipeline with Schedule H integration:
+        
+        ```python
+        from data_ingestion.multi_year_ingestion import run_multi_year_pipeline
+        run_multi_year_pipeline()
+        ```
+        
+        This will merge Schedule H financial data (including PRT transactions and asset sizes) with the existing plan data.
+        """)
+        st.stop()
+    
+    # PRT Tabs
+    prt_tab1, prt_tab2, prt_tab3, prt_tab4, prt_tab5 = st.tabs([
+        "📊 Overview", "💰 PRT Transactions", "🏭 By Industry", "🎯 PRT Opportunities", "📈 Asset Analysis"
+    ])
+    
+    # === TAB 1: OVERVIEW ===
+    with prt_tab1:
+        st.subheader("PRT Market Overview")
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        prt_col = 'SCH_H_PRT_AMOUNT'
+        assets_col = 'SCH_H_TOTAL_ASSETS_EOY'
+        
+        # PRT transactions
+        prt_mask = db[prt_col].fillna(0) > 0
+        prt_plans = prt_mask.sum()
+        total_prt = db[prt_col].fillna(0).sum()
+        
+        # Assets
+        total_assets = db[assets_col].fillna(0).sum()
+        avg_assets = db[assets_col].fillna(0).mean()
+        
+        col1.metric("Plans with PRT Activity", f"{prt_plans:,}")
+        col2.metric("Total PRT Volume", f"${total_prt/1e9:,.2f}B")
+        col3.metric("Total Plan Assets", f"${total_assets/1e12:,.2f}T")
+        col4.metric("Avg Plan Assets", f"${avg_assets/1e6:,.1f}M")
+        
+        st.markdown("---")
+        
+        # PRT Category distribution
+        st.subheader("PRT Transaction Size Distribution")
+        if 'PRT_CATEGORY' in db.columns:
+            prt_cat = db[db[prt_col].fillna(0) > 0]['PRT_CATEGORY'].value_counts()
+            
+            # Order categories
+            cat_order = ['Small (<$10M)', 'Medium ($10M-$100M)', 'Large ($100M-$500M)', 'Mega (>$500M)']
+            prt_cat = prt_cat.reindex([c for c in cat_order if c in prt_cat.index])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.bar_chart(prt_cat)
+            with col2:
+                st.dataframe(prt_cat.reset_index().rename(columns={'index': 'Category', 'PRT_CATEGORY': 'Plan Count'}))
+        
+        # Asset size distribution
+        st.subheader("Asset Size Distribution")
+        if 'ASSET_SIZE_CATEGORY' in db.columns:
+            asset_dist = db['ASSET_SIZE_CATEGORY'].value_counts()
+            
+            # Order categories
+            asset_order = ['Small (<$10M)', 'Medium ($10M-$100M)', 'Large ($100M-$500M)', 
+                          'Very Large ($500M-$1B)', 'Mega (>$1B)', 'Unknown']
+            asset_dist = asset_dist.reindex([c for c in asset_order if c in asset_dist.index])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.bar_chart(asset_dist)
+            with col2:
+                # Add total assets by category
+                asset_by_cat = db.groupby('ASSET_SIZE_CATEGORY')[assets_col].sum().reindex(
+                    [c for c in asset_order if c in asset_dist.index]
+                )
+                summary_df = pd.DataFrame({
+                    'Plan Count': asset_dist,
+                    'Total Assets': asset_by_cat.apply(lambda x: f"${x/1e9:,.2f}B")
+                })
+                st.dataframe(summary_df)
+    
+    # === TAB 2: PRT TRANSACTIONS ===
+    with prt_tab2:
+        st.subheader("PRT Transactions")
+        
+        # Filter to plans with PRT
+        prt_df = db[db[prt_col].fillna(0) > 0].copy()
+        
+        if len(prt_df) == 0:
+            st.info("No PRT transactions found in this year's data.")
+        else:
+            # Size filter
+            min_prt = st.slider(
+                "Minimum PRT Amount ($ millions)", 
+                min_value=0, 
+                max_value=1000, 
+                value=0,
+                step=10
+            )
+            prt_df = prt_df[prt_df[prt_col] >= min_prt * 1e6]
+            
+            st.write(f"**{len(prt_df):,} plans** with PRT transactions ≥ ${min_prt}M")
+            
+            # Display columns
+            display_cols = ['SPONSOR_DFE_NAME', 'EIN', prt_col, assets_col]
+            if 'INDUSTRY_SECTOR' in db.columns:
+                display_cols.insert(1, 'INDUSTRY_SECTOR')
+            if 'ACTUARY_FIRM_NAME' in db.columns:
+                display_cols.append('ACTUARY_FIRM_NAME')
+            if 'PRT_PCT_OF_ASSETS' in db.columns:
+                display_cols.append('SCH_H_PRT_PCT_OF_ASSETS')
+            
+            available_cols = [c for c in display_cols if c in prt_df.columns]
+            
+            # Sort by PRT amount
+            prt_display = prt_df[available_cols].sort_values(prt_col, ascending=False)
+            
+            # Format currency columns
+            format_df = prt_display.copy()
+            format_df[prt_col] = format_df[prt_col].apply(lambda x: f"${x/1e6:,.1f}M" if pd.notna(x) else "N/A")
+            format_df[assets_col] = format_df[assets_col].apply(lambda x: f"${x/1e6:,.1f}M" if pd.notna(x) else "N/A")
+            
+            st.dataframe(format_df.head(100), use_container_width=True)
+            
+            # Download
+            st.download_button(
+                "📥 Download PRT Transactions CSV",
+                prt_display.to_csv(index=False),
+                file_name=f"prt_transactions_{selected_year}.csv"
+            )
+    
+    # === TAB 3: BY INDUSTRY ===
+    with prt_tab3:
+        st.subheader("PRT Activity by Industry")
+        
+        if 'BUSINESS_CODE' in db.columns:
+            # Add industry sector
+            db_industry = db.copy()
+            db_industry['INDUSTRY_SECTOR'] = db_industry['BUSINESS_CODE'].apply(get_naics_sector)
+            
+            # Aggregate by industry
+            industry_prt = db_industry.groupby('INDUSTRY_SECTOR').agg({
+                prt_col: ['sum', lambda x: (x.fillna(0) > 0).sum()],
+                assets_col: 'sum',
+                'EIN': 'count'
+            }).round(0)
+            
+            industry_prt.columns = ['Total PRT ($)', 'PRT Plans', 'Total Assets ($)', 'Total Plans']
+            industry_prt['PRT Rate (%)'] = (industry_prt['PRT Plans'] / industry_prt['Total Plans'] * 100).round(1)
+            industry_prt = industry_prt.sort_values('Total PRT ($)', ascending=False)
+            
+            # Display with formatting
+            display_ind = industry_prt.copy()
+            display_ind['Total PRT ($)'] = display_ind['Total PRT ($)'].apply(lambda x: f"${x/1e9:,.2f}B")
+            display_ind['Total Assets ($)'] = display_ind['Total Assets ($)'].apply(lambda x: f"${x/1e9:,.2f}B")
+            
+            st.dataframe(display_ind, use_container_width=True)
+            
+            # Chart
+            st.subheader("PRT Volume by Industry")
+            chart_data = industry_prt['Total PRT ($)'].head(10) / 1e9
+            st.bar_chart(chart_data)
+        else:
+            st.warning("Industry data not available.")
+    
+    # === TAB 4: PRT OPPORTUNITIES ===
+    with prt_tab4:
+        st.subheader("PRT Opportunity Identification")
+        st.caption("Plans with high PRT readiness scores that haven't done a transfer yet.")
+        
+        if 'PRT_READINESS_SCORE' in db.columns:
+            # Plans without PRT but high readiness
+            no_prt = db[db[prt_col].fillna(0) == 0].copy()
+            
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                min_score = st.slider("Minimum PRT Readiness Score", 0, 100, 30, step=5)
+            
+            with col2:
+                min_assets = st.selectbox(
+                    "Minimum Asset Size",
+                    ["No minimum", "$10M+", "$50M+", "$100M+", "$500M+", "$1B+"]
+                )
+                asset_threshold = {
+                    "No minimum": 0,
+                    "$10M+": 10_000_000,
+                    "$50M+": 50_000_000,
+                    "$100M+": 100_000_000,
+                    "$500M+": 500_000_000,
+                    "$1B+": 1_000_000_000
+                }[min_assets]
+            
+            with col3:
+                industry_filter = st.selectbox(
+                    "Industry Sector",
+                    ["All Industries"] + sorted(db['INDUSTRY_SECTOR'].dropna().unique().tolist()) if 'INDUSTRY_SECTOR' in db.columns else ["All Industries"]
+                )
+            
+            # Apply filters
+            candidates = no_prt[no_prt['PRT_READINESS_SCORE'] >= min_score]
+            candidates = candidates[candidates[assets_col].fillna(0) >= asset_threshold]
+            
+            if industry_filter != "All Industries" and 'INDUSTRY_SECTOR' in candidates.columns:
+                candidates = candidates[candidates['INDUSTRY_SECTOR'] == industry_filter]
+            
+            # Sort by readiness score
+            candidates = candidates.sort_values('PRT_READINESS_SCORE', ascending=False)
+            
+            st.write(f"**{len(candidates):,} potential PRT opportunities** matching your criteria")
+            
+            # Display columns
+            display_cols = ['SPONSOR_DFE_NAME', 'PRT_READINESS_SCORE', assets_col]
+            if 'INDUSTRY_SECTOR' in candidates.columns:
+                display_cols.insert(1, 'INDUSTRY_SECTOR')
+            if 'RETIREE_PCT' in candidates.columns:
+                display_cols.append('RETIREE_PCT')
+            if 'FUNDING_TARGET_PCT' in candidates.columns:
+                display_cols.append('FUNDING_TARGET_PCT')
+            if 'MORTALITY_CODE' in candidates.columns:
+                display_cols.append('MORTALITY_CODE')
+            if 'ACTUARY_FIRM_NAME' in candidates.columns:
+                display_cols.append('ACTUARY_FIRM_NAME')
+            
+            available_cols = [c for c in display_cols if c in candidates.columns]
+            
+            cand_display = candidates[available_cols].copy()
+            cand_display[assets_col] = cand_display[assets_col].apply(lambda x: f"${x/1e6:,.1f}M" if pd.notna(x) else "N/A")
+            
+            st.dataframe(cand_display.head(100), use_container_width=True)
+            
+            # Download
+            st.download_button(
+                "📥 Download PRT Opportunities CSV",
+                candidates[available_cols].to_csv(index=False),
+                file_name=f"prt_opportunities_{selected_year}.csv"
+            )
+            
+            # Score explanation
+            with st.expander("ℹ️ How is PRT Readiness Score calculated?"):
+                st.markdown("""
+                The PRT Readiness Score (0-100) is calculated based on factors that typically indicate 
+                a plan is a good candidate for pension risk transfer:
+                
+                | Factor | Points |
+                |--------|--------|
+                | High retiree percentage | Up to 30 pts |
+                | Funding status ≥80% | 20 pts |
+                | Funding status ≥95% | +10 pts |
+                | Assets ≥$100M | 10 pts |
+                | Assets ≥$500M | +10 pts |
+                | Assets ≥$1B | +10 pts |
+                | Not using substitute mortality | 20 pts |
+                
+                **Higher scores indicate plans more likely to be PRT candidates.**
+                """)
+        else:
+            st.warning("PRT Readiness Score not calculated. Re-run the data pipeline to generate this metric.")
+    
+    # === TAB 5: ASSET ANALYSIS ===
+    with prt_tab5:
+        st.subheader("Asset Analysis")
+        
+        # Asset growth metrics
+        if 'SCH_H_TOTAL_ASSETS_BOY' in db.columns and assets_col in db.columns:
+            st.write("### Asset Changes Year-over-Year")
+            
+            # Plans with asset data
+            asset_df = db[[assets_col, 'SCH_H_TOTAL_ASSETS_BOY', 'SCH_H_ASSET_CHANGE', 'SCH_H_ASSET_CHANGE_PCT']].dropna()
+            
+            if len(asset_df) > 0:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_boy = asset_df['SCH_H_TOTAL_ASSETS_BOY'].sum()
+                total_eoy = asset_df[assets_col].sum()
+                net_change = total_eoy - total_boy
+                avg_change_pct = asset_df['SCH_H_ASSET_CHANGE_PCT'].mean()
+                
+                col1.metric("Total Assets BOY", f"${total_boy/1e12:,.2f}T")
+                col2.metric("Total Assets EOY", f"${total_eoy/1e12:,.2f}T")
+                col3.metric("Net Change", f"${net_change/1e9:,.1f}B", delta=f"{net_change/total_boy*100:.1f}%")
+                col4.metric("Avg Plan Change", f"{avg_change_pct:.1f}%")
+        
+        # Investment allocation
+        st.write("### Investment Allocation Summary")
+        
+        allocation_cols = {
+            'SCH_H_CASH_EOY': 'Cash',
+            'SCH_H_GOVT_SECURITIES_EOY': 'Government Securities',
+            'SCH_H_CORP_DEBT_EOY': 'Corporate Debt',
+            'SCH_H_COMMON_STOCK_EOY': 'Common Stock',
+            'SCH_H_PREF_STOCK_EOY': 'Preferred Stock',
+            'SCH_H_REAL_ESTATE_EOY': 'Real Estate',
+            'SCH_H_INS_CO_GEN_ACCT_EOY': 'Insurance Co. General Account'
+        }
+        
+        alloc_data = {}
+        for col, name in allocation_cols.items():
+            if col in db.columns:
+                alloc_data[name] = db[col].fillna(0).sum()
+        
+        if alloc_data:
+            alloc_df = pd.DataFrame.from_dict(alloc_data, orient='index', columns=['Total ($)'])
+            alloc_df['% of Total'] = (alloc_df['Total ($)'] / alloc_df['Total ($)'].sum() * 100).round(1)
+            alloc_df = alloc_df.sort_values('Total ($)', ascending=False)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                # Format for display
+                alloc_display = alloc_df.copy()
+                alloc_display['Total ($)'] = alloc_display['Total ($)'].apply(lambda x: f"${x/1e9:,.1f}B")
+                alloc_display['% of Total'] = alloc_display['% of Total'].apply(lambda x: f"{x:.1f}%")
+                st.dataframe(alloc_display)
+            
+            with col2:
+                st.bar_chart(alloc_df['% of Total'])
+        
+        # Income/Expense analysis
+        st.write("### Income & Expense Summary")
+        
+        income_cols = {
+            'SCH_H_TOTAL_INCOME': 'Total Income',
+            'SCH_H_TOTAL_CONTRIBUTIONS': 'Total Contributions',
+            'SCH_H_TOTAL_DISTRIBUTIONS': 'Total Distributions',
+            'SCH_H_TOTAL_EXPENSES': 'Total Expenses'
+        }
+        
+        income_data = {}
+        for col, name in income_cols.items():
+            if col in db.columns:
+                income_data[name] = db[col].fillna(0).sum()
+        
+        if income_data:
+            income_df = pd.DataFrame.from_dict(income_data, orient='index', columns=['Total ($)'])
+            income_df['Total ($)'] = income_df['Total ($)'].apply(lambda x: f"${x/1e9:,.1f}B")
+            st.dataframe(income_df)
+
+# =============================
+# PRT HISTORY PAGE (MULTI-YEAR)
+# =============================
+elif menu == "PRT History":
+    st.title("PRT Transaction History (2019-2024)")
+    st.caption("Analyze pension risk transfer patterns across multiple years.")
+    st.markdown("---")
+    
+    # Helper function to format PRT amounts (handles lists, numpy arrays, etc.)
+    def format_prt_amounts(amounts):
+        """Convert list/array of PRT amounts to formatted string."""
+        try:
+            # Handle various input types
+            if amounts is None:
+                return "N/A"
+            # Convert numpy array or other iterables to list
+            if hasattr(amounts, 'tolist'):
+                amounts = amounts.tolist()
+            if not isinstance(amounts, (list, tuple)):
+                amounts = [amounts]
+            # Format each amount
+            formatted = []
+            for v in amounts:
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    formatted.append("N/A")
+                elif abs(v) >= 1e9:
+                    formatted.append(f"${v/1e9:.1f}B")
+                elif abs(v) >= 1e6:
+                    formatted.append(f"${v/1e6:.0f}M")
+                else:
+                    formatted.append(f"${v/1e3:.0f}K")
+            return ', '.join(formatted)
+        except Exception:
+            return str(amounts)
+    
+    def format_years(years):
+        """Convert list/array of years to formatted string."""
+        try:
+            if years is None:
+                return "N/A"
+            if hasattr(years, 'tolist'):
+                years = years.tolist()
+            if not isinstance(years, (list, tuple)):
+                years = [years]
+            return ', '.join(str(int(y)) for y in years)
+        except Exception:
+            return str(years)
+    
+    # Load multi-year history if available
+    prt_history_path = os.path.join(PROJECT_ROOT, "data_output", "prt_multi_year_history.parquet")
+    
+    if not os.path.exists(prt_history_path):
+        st.warning("""
+        ⚠️ **Multi-year PRT history not yet generated.**
+        
+        Run the PRT analysis script to generate the history:
+        
+        ```python
+        python data_analysis/prt_multi_year_analysis.py
+        ```
+        """)
+        st.stop()
+    
+    @st.cache_data
+    def load_prt_history():
+        return pd.read_parquet(prt_history_path)
+    
+    prt_hist = load_prt_history()
+    
+    # Tabs for different views
+    hist_tab1, hist_tab2, hist_tab3, hist_tab4, hist_tab5 = st.tabs([
+        "📊 Summary", "🏢 By Sponsor", "🔄 Repeat Transactors", "📈 Trends", "🔍 Search"
+    ])
+    
+    # === TAB 1: SUMMARY ===
+    with hist_tab1:
+        st.subheader("Multi-Year PRT Summary")
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_prt = prt_hist['TOTAL_PRT'].sum()
+        unique_plans = len(prt_hist)
+        repeat_count = (prt_hist['NUM_TRANSACTIONS'] >= 2).sum()
+        repeat_prt = prt_hist[prt_hist['NUM_TRANSACTIONS'] >= 2]['TOTAL_PRT'].sum()
+        
+        col1.metric("Total PRT Volume", f"${total_prt/1e9:,.1f}B")
+        col2.metric("Unique Plans with PRT", f"{unique_plans:,}")
+        col3.metric("Repeat Transactors", f"{repeat_count:,}")
+        col4.metric("% from Repeat", f"{repeat_prt/total_prt*100:.1f}%")
+        
+        st.markdown("---")
+        
+        # Transaction frequency distribution
+        st.subheader("Transaction Frequency Distribution")
+        freq = prt_hist['NUM_TRANSACTIONS'].value_counts().sort_index()
+        freq_df = pd.DataFrame({
+            'Transactions': freq.index,
+            'Plan Count': freq.values
+        })
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.bar_chart(freq_df.set_index('Transactions'))
+        with col2:
+            freq_df['% of Total'] = (freq_df['Plan Count'] / freq_df['Plan Count'].sum() * 100).round(1)
+            st.dataframe(freq_df, use_container_width=True)
+        
+        # Top 20 by total PRT
+        st.subheader("Top 20 Plans by Total PRT Volume")
+        top20 = prt_hist.head(20).copy()
+        top20['YEARS_STR'] = top20['YEARS'].apply(format_years)
+        top20['PRT_BY_YEAR_FMT'] = top20['PRT_BY_YEAR'].apply(format_prt_amounts)
+        top20['TOTAL_PRT_FMT'] = top20['TOTAL_PRT'].apply(lambda x: f"${x/1e6:,.0f}M" if x >= 1e6 else f"${x/1e3:,.0f}K")
+        
+        display_cols = ['SPONSOR_NAME', 'YEARS_STR', 'PRT_BY_YEAR_FMT', 'TOTAL_PRT_FMT']
+        if 'INDUSTRY_SECTOR' in top20.columns:
+            display_cols.insert(1, 'INDUSTRY_SECTOR')
+        
+        top20_display = top20[display_cols].rename(columns={
+            'SPONSOR_NAME': 'Sponsor',
+            'YEARS_STR': 'Years',
+            'PRT_BY_YEAR_FMT': 'PRT by Year',
+            'TOTAL_PRT_FMT': 'Total PRT'
+        })
+        if 'INDUSTRY_SECTOR' in top20_display.columns:
+            top20_display = top20_display.rename(columns={'INDUSTRY_SECTOR': 'Industry'})
+        
+        st.dataframe(top20_display, use_container_width=True)
+    
+    # === TAB 2: BY SPONSOR ===
+    with hist_tab2:
+        st.subheader("PRT Summary by Plan Sponsor")
+        st.caption("Aggregated view of PRT activity across all plans for each sponsor")
+        
+        # Aggregate by sponsor name (normalize to handle slight variations)
+        sponsor_agg = prt_hist.groupby('SPONSOR_NAME').agg({
+            'TOTAL_PRT': 'sum',
+            'TRACKING_ID': 'count',  # Number of plans
+            'NUM_TRANSACTIONS': 'sum',  # Total transactions across all plans
+            'YEARS': lambda x: sorted(set(y for years in x for y in (years.tolist() if hasattr(years, 'tolist') else years))),
+            'EIN': 'first',
+        }).reset_index()
+        
+        sponsor_agg.columns = ['SPONSOR_NAME', 'TOTAL_PRT', 'NUM_PLANS', 'TOTAL_TRANSACTIONS', 'YEARS_ACTIVE', 'EIN']
+        sponsor_agg = sponsor_agg.sort_values('TOTAL_PRT', ascending=False)
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        unique_sponsors = len(sponsor_agg)
+        multi_plan_sponsors = (sponsor_agg['NUM_PLANS'] > 1).sum()
+        top_sponsor_prt = sponsor_agg['TOTAL_PRT'].iloc[0] if len(sponsor_agg) > 0 else 0
+        top_sponsor_name = sponsor_agg['SPONSOR_NAME'].iloc[0] if len(sponsor_agg) > 0 else "N/A"
+        
+        col1.metric("Unique Sponsors", f"{unique_sponsors:,}")
+        col2.metric("Multi-Plan Sponsors", f"{multi_plan_sponsors:,}")
+        col3.metric("Top Sponsor PRT", f"${top_sponsor_prt/1e9:.1f}B")
+        col4.metric("Top Sponsor", top_sponsor_name[:20])
+        
+        st.markdown("---")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            min_plans_filter = st.selectbox("Minimum Plans", [1, 2, 3, 5], index=0, key="sponsor_min_plans")
+        with col2:
+            min_prt_sponsor = st.number_input("Minimum Total PRT ($M)", min_value=0, value=0, step=50, key="sponsor_min_prt")
+        with col3:
+            sort_by = st.selectbox("Sort By", ["Total PRT", "Number of Plans", "Number of Transactions"], index=0)
+        
+        # Apply filters
+        filtered_sponsors = sponsor_agg[sponsor_agg['NUM_PLANS'] >= min_plans_filter].copy()
+        filtered_sponsors = filtered_sponsors[filtered_sponsors['TOTAL_PRT'] >= min_prt_sponsor * 1e6]
+        
+        # Apply sorting
+        sort_col = {'Total PRT': 'TOTAL_PRT', 'Number of Plans': 'NUM_PLANS', 'Number of Transactions': 'TOTAL_TRANSACTIONS'}[sort_by]
+        filtered_sponsors = filtered_sponsors.sort_values(sort_col, ascending=False)
+        
+        st.write(f"**{len(filtered_sponsors):,} sponsors** matching criteria")
+        
+        # Prepare display
+        display_sponsors = filtered_sponsors.copy()
+        display_sponsors['YEARS_STR'] = display_sponsors['YEARS_ACTIVE'].apply(format_years)
+        display_sponsors['TOTAL_PRT_FMT'] = display_sponsors['TOTAL_PRT'].apply(
+            lambda x: f"${x/1e9:.2f}B" if x >= 1e9 else f"${x/1e6:,.0f}M"
+        )
+        display_sponsors['AVG_PRT_PER_PLAN'] = (display_sponsors['TOTAL_PRT'] / display_sponsors['NUM_PLANS']).apply(
+            lambda x: f"${x/1e6:,.0f}M"
+        )
+        
+        display_cols = ['SPONSOR_NAME', 'NUM_PLANS', 'TOTAL_TRANSACTIONS', 'YEARS_STR', 'TOTAL_PRT_FMT', 'AVG_PRT_PER_PLAN']
+        
+        st.dataframe(
+            display_sponsors[display_cols].rename(columns={
+                'SPONSOR_NAME': 'Sponsor',
+                'NUM_PLANS': '# Plans',
+                'TOTAL_TRANSACTIONS': '# Transactions',
+                'YEARS_STR': 'Years Active',
+                'TOTAL_PRT_FMT': 'Total PRT',
+                'AVG_PRT_PER_PLAN': 'Avg per Plan'
+            }),
+            use_container_width=True
+        )
+        
+        # Download
+        st.download_button(
+            "📥 Download Sponsor Summary CSV",
+            display_sponsors[['SPONSOR_NAME', 'EIN', 'NUM_PLANS', 'TOTAL_TRANSACTIONS', 'YEARS_STR', 'TOTAL_PRT']].to_csv(index=False),
+            file_name="prt_by_sponsor.csv"
+        )
+        
+        st.markdown("---")
+        
+        # Drill-down: Select a sponsor to see their plans
+        st.subheader("Sponsor Drill-Down")
+        sponsor_list = filtered_sponsors['SPONSOR_NAME'].head(100).tolist()
+        if sponsor_list:
+            selected_sponsor = st.selectbox("Select a sponsor to view their plans", sponsor_list, key="sponsor_drilldown")
+            
+            if selected_sponsor:
+                sponsor_plans = prt_hist[prt_hist['SPONSOR_NAME'] == selected_sponsor].copy()
+                
+                st.write(f"**{len(sponsor_plans)} plan(s)** for {selected_sponsor}")
+                
+                # Show each plan
+                for _, plan in sponsor_plans.iterrows():
+                    years_str = format_years(plan['YEARS'])
+                    amounts_str = format_prt_amounts(plan['PRT_BY_YEAR'])
+                    total_fmt = f"${plan['TOTAL_PRT']/1e6:,.0f}M" if plan['TOTAL_PRT'] >= 1e6 else f"${plan['TOTAL_PRT']/1e3:,.0f}K"
+                    
+                    with st.expander(f"{plan['PLAN_NAME']} (EIN: {plan['EIN']}, Plan #{plan['PLAN_NUMBER']})"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Years with PRT:** {years_str}")
+                            st.write(f"**Number of Transactions:** {plan['NUM_TRANSACTIONS']}")
+                        with col2:
+                            st.write(f"**PRT by Year:** {amounts_str}")
+                            st.write(f"**Total PRT:** {total_fmt}")
+    
+    # === TAB 3: REPEAT TRANSACTORS ===
+    with hist_tab3:
+        st.subheader("Repeat PRT Transactors")
+        st.caption("Plans with PRT transactions in multiple years (2+ years)")
+        
+        # Filters
+        col1, col2 = st.columns(2)
+        with col1:
+            min_trans = st.selectbox("Minimum Transactions", [2, 3, 4, 5, 6], index=0)
+        with col2:
+            min_prt = st.number_input("Minimum Total PRT ($M)", min_value=0, value=0, step=10)
+        
+        # Filter data
+        repeat_df = prt_hist[prt_hist['NUM_TRANSACTIONS'] >= min_trans].copy()
+        repeat_df = repeat_df[repeat_df['TOTAL_PRT'] >= min_prt * 1e6]
+        
+        st.write(f"**{len(repeat_df):,} plans** with {min_trans}+ transactions")
+        
+        # Prepare display with proper formatting
+        repeat_df['YEARS_STR'] = repeat_df['YEARS'].apply(format_years)
+        repeat_df['AMOUNTS_STR'] = repeat_df['PRT_BY_YEAR'].apply(format_prt_amounts)
+        repeat_df['TOTAL_PRT_FMT'] = repeat_df['TOTAL_PRT'].apply(lambda x: f"${x/1e6:,.0f}M" if x >= 1e6 else f"${x/1e3:,.0f}K")
+        
+        display_cols = ['SPONSOR_NAME', 'YEARS_STR', 'AMOUNTS_STR', 'TOTAL_PRT_FMT', 'EIN']
+        repeat_display = repeat_df[display_cols].rename(columns={
+            'SPONSOR_NAME': 'Sponsor',
+            'YEARS_STR': 'Years',
+            'AMOUNTS_STR': 'PRT by Year',
+            'TOTAL_PRT_FMT': 'Total PRT',
+            'EIN': 'EIN'
+        })
+        
+        st.dataframe(repeat_display, use_container_width=True)
+        
+        # Download
+        st.download_button(
+            "📥 Download Repeat Transactors CSV",
+            repeat_df[['SPONSOR_NAME', 'EIN', 'PLAN_NUMBER', 'YEARS_STR', 'AMOUNTS_STR', 'TOTAL_PRT']].to_csv(index=False),
+            file_name="prt_repeat_transactors.csv"
+        )
+    
+    # === TAB 4: TRENDS ===
+    with hist_tab4:
+        st.subheader("PRT Trends Over Time")
+        
+        # Calculate yearly totals from the transaction lists
+        yearly_data = []
+        for _, row in prt_hist.iterrows():
+            if isinstance(row['YEARS'], list) and isinstance(row['PRT_BY_YEAR'], list):
+                for year, amount in zip(row['YEARS'], row['PRT_BY_YEAR']):
+                    yearly_data.append({'Year': year, 'PRT_Amount': amount})
+        
+        if yearly_data:
+            yearly_df = pd.DataFrame(yearly_data)
+            yearly_agg = yearly_df.groupby('Year').agg({
+                'PRT_Amount': ['sum', 'count']
+            }).reset_index()
+            yearly_agg.columns = ['Year', 'Total PRT', 'Transaction Count']
+            yearly_agg = yearly_agg.sort_values('Year')
+            
+            # Display metrics
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("### Total PRT Volume by Year")
+                chart_data = yearly_agg.set_index('Year')['Total PRT'] / 1e9
+                st.bar_chart(chart_data)
+            
+            with col2:
+                st.write("### Transaction Count by Year")
+                st.bar_chart(yearly_agg.set_index('Year')['Transaction Count'])
+            
+            # Summary table
+            st.write("### Yearly Summary")
+            yearly_display = yearly_agg.copy()
+            yearly_display['Total PRT'] = yearly_display['Total PRT'].apply(lambda x: f"${x/1e9:,.2f}B")
+            yearly_display['Avg Transaction'] = (yearly_agg['Total PRT'] / yearly_agg['Transaction Count']).apply(lambda x: f"${x/1e6:,.1f}M")
+            st.dataframe(yearly_display, use_container_width=True)
+    
+    # === TAB 5: SEARCH ===
+    with hist_tab5:
+        st.subheader("Search PRT History")
+        
+        # Search by sponsor name
+        search_term = st.text_input("Search by sponsor name", placeholder="e.g., IBM, AT&T, Lockheed")
+        
+        if search_term:
+            search_results = prt_hist[prt_hist['SPONSOR_NAME'].str.contains(search_term, case=False, na=False)].copy()
+            
+            if len(search_results) == 0:
+                st.info(f"No plans found matching '{search_term}'")
+            else:
+                st.write(f"**{len(search_results):,} plans** matching '{search_term}'")
+                
+                # Prepare display with proper formatting
+                search_results['YEARS_STR'] = search_results['YEARS'].apply(format_years)
+                search_results['AMOUNTS_STR'] = search_results['PRT_BY_YEAR'].apply(format_prt_amounts)
+                search_results['TOTAL_PRT_FMT'] = search_results['TOTAL_PRT'].apply(lambda x: f"${x/1e6:,.0f}M" if x >= 1e6 else f"${x/1e3:,.0f}K")
+                
+                display_cols = ['SPONSOR_NAME', 'PLAN_NAME', 'EIN', 'YEARS_STR', 'AMOUNTS_STR', 'TOTAL_PRT_FMT']
+                available_cols = [c for c in display_cols if c in search_results.columns]
+                
+                st.dataframe(search_results[available_cols].rename(columns={
+                    'SPONSOR_NAME': 'Sponsor',
+                    'PLAN_NAME': 'Plan Name',
+                    'YEARS_STR': 'Years',
+                    'AMOUNTS_STR': 'PRT by Year',
+                    'TOTAL_PRT_FMT': 'Total PRT'
+                }), use_container_width=True)
+        
+        # EIN lookup
+        st.markdown("---")
+        ein_search = st.text_input("Search by EIN", placeholder="e.g., 133937090")
+        
+        if ein_search:
+            ein_clean = ein_search.replace('-', '').strip()
+            ein_results = prt_hist[prt_hist['EIN'].astype(str).str.contains(ein_clean, na=False)].copy()
+            
+            if len(ein_results) == 0:
+                st.info(f"No plans found for EIN '{ein_search}'")
+            else:
+                st.write(f"**{len(ein_results):,} plans** for EIN '{ein_search}'")
+                
+                for _, row in ein_results.iterrows():
+                    years_str = format_years(row['YEARS'])
+                    amounts_str = format_prt_amounts(row['PRT_BY_YEAR'])
+                    total_prt_fmt = f"${row['TOTAL_PRT']/1e6:,.0f}M" if row['TOTAL_PRT'] >= 1e6 else f"${row['TOTAL_PRT']/1e3:,.0f}K"
+                    
+                    with st.expander(f"{row['SPONSOR_NAME']} - EIN: {row['EIN']}"):
+                        st.write(f"**Plan Name:** {row['PLAN_NAME']}")
+                        st.write(f"**Years with PRT:** {years_str}")
+                        st.write(f"**PRT Amounts:** {amounts_str}")
+                        st.write(f"**Total PRT:** {total_prt_fmt}")
+                        st.write(f"**Number of Transactions:** {row['NUM_TRANSACTIONS']}")
 
 # =============================
 # ACTUARIAL FIRMS PAGE

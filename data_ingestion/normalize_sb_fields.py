@@ -144,15 +144,23 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     out['ACTUARY_CITY'] = get_col(FIELD_MAP['ACTUARY_CITY'], 'str')
     out['ACTUARY_STATE'] = get_col(FIELD_MAP['ACTUARY_STATE'], 'str')
 
+    # ACK_ID: copy from source if present, or synthesize
+    if 'ACK_ID' in df.columns:
+        out['ACK_ID'] = df['ACK_ID'].astype(str).str.strip()
+    elif all(x in df.columns for x in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR']):
+        out['ACK_ID'] = df['EIN'].astype(str).str.strip() + '-' + df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3) + '-' + str(plan_year if plan_year is not None else '')
+    else:
+        out['ACK_ID'] = pd.NA
+
     # Ensure all required columns exist (fallback to None)
     for col in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT', 'TOTAL_PARTICIPANTS',
                 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
-                'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE']:
+                'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE', 'ACK_ID']:
         if col not in out.columns:
             out[col] = None
 
     # Output only the normalized schema columns, in order
-    schema = ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT',
+    schema = ['ACK_ID', 'EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT',
               'TOTAL_PARTICIPANTS', 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
               'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE']
     return out[schema]

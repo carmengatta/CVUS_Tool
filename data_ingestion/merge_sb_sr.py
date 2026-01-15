@@ -49,4 +49,11 @@ def merge_sb_sr(sb_df: pd.DataFrame, sr_df: pd.DataFrame) -> pd.DataFrame:
     merged_final = pd.concat([merged, fallback], ignore_index=True)
     # Drop any duplicate SB plans (should not happen, but enforce)
     merged_final = merged_final.drop_duplicates(subset=["EIN", "PLAN_NUMBER", "YEAR"])
+    
+    # Consolidate ACK_ID: prefer ACK_ID_SB (from Schedule SB), fall back to ACK_ID if exists
+    if 'ACK_ID_SB' in merged_final.columns:
+        merged_final['ACK_ID'] = merged_final['ACK_ID_SB']
+    elif 'ACK_ID' not in merged_final.columns:
+        merged_final['ACK_ID'] = pd.NA
+    
     return merged_final.reset_index(drop=True)
