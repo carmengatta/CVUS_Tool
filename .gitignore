@@ -26,3 +26,9 @@ data_output/*.csv
 # System files
 .DS_Store
 Thumbs.db
+
+# Private side business (not tracked)
+private/
+
+# Claude Code per-machine local settings
+.claude/settings.local.json

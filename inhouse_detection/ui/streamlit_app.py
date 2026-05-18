@@ -1,5 +1,3 @@
-def main():
-
 """
 Read-only Streamlit UI for manual review of Evidence and ContactCandidate data.
 No scraping triggers, no editing, no synthesis or orchestration.

@@ -58,4 +58,41 @@ def run_serp_search(query: str, delay: float = 1.5):
         search = GoogleSearch(params)
         result = search.get_dict()
     except Exception as e:
-        p
+        print(f"SERP API error: {e}")
+        return None
+
+    time.sleep(delay)
+    return result
+
+
+# ------------------------------------------------------------
+# Result Extraction
+# ------------------------------------------------------------
+def extract_top_results(result: dict, max_results: int = 5):
+    """
+    Extract top organic results from SERP API response.
+    Returns list of dicts with title, link, snippet.
+    """
+    if not result:
+        return []
+    return result.get("organic_results", [])[:max_results]
+
+
+# ------------------------------------------------------------
+# Keyword Detection
+# ------------------------------------------------------------
+def detect_actuary_keywords(text: str) -> bool:
+    """
+    Detect pension-actuarial keywords in a text snippet.
+    Returns True if any relevant keyword is found.
+    """
+    if not text:
+        return False
+    text_lower = text.lower()
+    keywords = [
+        "pension actuary", "enrolled actuary", "actuarial team",
+        "defined benefit", "pension valuation", "retirement actuary",
+        "pension administration", "actuarial department",
+        "in-house actuary", "staff actuary",
+    ]
+    return any(kw in text_lower for kw in keywords)

@@ -13,7 +13,7 @@ from utils.naics_codes import get_naics_sector, get_naics_description
 # =============================
 # SIMPLE PASSWORD PROTECTION
 # =============================
-PASSWORD = "CVUSTool"  # CHANGE FOR DEPLOYMENT
+PASSWORD = st.secrets.get("auth", {}).get("password", os.environ.get("FORM5500_PASSWORD", "CVUSTool"))
 def password_gate():
     pw = st.text_input("Enter password:", type="password")
     if pw == PASSWORD:
@@ -89,7 +89,7 @@ if menu == "Dashboard":
     total_plans = len(db)
     retiree_col = "RETIREE_COUNT" if "RETIREE_COUNT" in db.columns else None
     total_retirees = int(db[retiree_col].sum()) if retiree_col else "N/A"
-    liability_col = "LIABILITY_TOTAL" if "LIABILITY_TOTAL" in db.columns else None
+    liability_col = next((c for c in ["TOTAL_LIABILITY", "LIABILITY_TOTAL"] if c in db.columns), None)
     total_liability = float(db[liability_col].sum()) if liability_col else "N/A"
     participant_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in db.columns else None
     total_participants = int(db[participant_col].sum()) if participant_col else "N/A"
@@ -112,7 +112,7 @@ if menu == "Dashboard":
         active_col = "ACTIVE_COUNT" if "ACTIVE_COUNT" in db.columns else None
         total_col = "TOTAL_PARTICIPANTS" if "TOTAL_PARTICIPANTS" in db.columns else None
         if retiree_col:
-            cols = [c for c in ["EIN", "PLAN_NAME", active_col, retiree_col, separated_col, total_col, "LIABILITY_TOTAL"] if c and c in db.columns]
+            cols = [c for c in ["EIN", "PLAN_NAME", active_col, retiree_col, separated_col, total_col, "TOTAL_LIABILITY", "LIABILITY_TOTAL"] if c and c in db.columns]
             top_plans = db.sort_values(retiree_col, ascending=False).head(top_n)
             st.dataframe(top_plans[cols], use_container_width=True)
             st.download_button("Download Table", top_plans[cols].to_csv(index=False), file_name="top_plans.csv")
@@ -127,8 +127,9 @@ if menu == "Dashboard":
             agg_dict = {retiree_col: "sum"}
             if "PLAN_NAME" in db.columns:
                 agg_dict["PLAN_NAME"] = "count"
-            if "LIABILITY_TOTAL" in db.columns:
-                agg_dict["LIABILITY_TOTAL"] = "sum"
+            _liab_col = next((c for c in ["TOTAL_LIABILITY", "LIABILITY_TOTAL"] if c in db.columns), None)
+            if _liab_col:
+                agg_dict[_liab_col] = "sum"
             # For sponsor name, take the first non-null value per EIN
             if sponsor_col:
                 sponsor_names = db.groupby("EIN")[sponsor_col].first().reset_index()
@@ -141,14 +142,12 @@ if menu == "Dashboard":
             display_cols = ["EIN"]
             if sponsor_col:
                 display_cols.append(sponsor_col)
-            display_cols += [col for col in [retiree_col, "NUM_PLANS", "LIABILITY_TOTAL"] if col in ein_rollup.columns]
+            display_cols += [col for col in [retiree_col, "NUM_PLANS", "TOTAL_LIABILITY", "LIABILITY_TOTAL"] if col in ein_rollup.columns]
             ein_rollup = ein_rollup.sort_values(retiree_col, ascending=False)
             st.dataframe(ein_rollup[display_cols].head(top_n), use_container_width=True)
             st.download_button("Download Table", ein_rollup[display_cols].head(top_n).to_csv(index=False), file_name="top_companies.csv")
         else:
             st.warning("Required columns not found for company rollup.")
-        st.write(f"{total_plans:,}")
-        st.write(f"{total_retirees:,}")
 
     # New Location tab
     with tab3:

@@ -41,7 +41,7 @@ def analyze_prt_history(df: pd.DataFrame) -> pd.DataFrame:
     Returns DataFrame with one row per plan, showing all years with PRT activity.
     """
     # Create unique tracking ID per plan
-    df['TRACKING_ID'] = df['EIN'].astype(str) + '_' + df['PLAN_NUMBER'].astype(str)
+    df['TRACKING_ID'] = df['EIN'].astype(str) + '-' + df['PLAN_NUMBER'].astype(str)
     
     # Filter to plans with PRT > 0
     prt_plans = df[df['SCH_H_PRT_AMOUNT'].fillna(0) > 0].copy()

@@ -29,13 +29,13 @@ def validate_alignment(sb_df: pd.DataFrame, f5500_df: pd.DataFrame):
     report["sb_rows"] = len(sb_df)
     report["f5500_rows"] = len(f5500_df)
 
-    # Count distinct ACK IDs
-    report["sb_ack_unique"] = sb_df["ack_id"].nunique()
-    report["f5500_ack_unique"] = f5500_df["ack_id"].nunique()
+    # Count distinct ACK IDs (UPPERCASE column names to match pipeline output)
+    report["sb_ack_unique"] = sb_df["ACK_ID"].nunique()
+    report["f5500_ack_unique"] = f5500_df["ACK_ID"].nunique()
 
     # Identify matches
-    sb_ack_set = set(sb_df["ack_id"].astype(str))
-    f5500_ack_set = set(f5500_df["ack_id"].astype(str))
+    sb_ack_set = set(sb_df["ACK_ID"].astype(str))
+    f5500_ack_set = set(f5500_df["ACK_ID"].astype(str))
 
     matching_ack = sb_ack_set.intersection(f5500_ack_set)
 

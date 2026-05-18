@@ -136,8 +136,9 @@ def add_prt_analysis_fields(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[df['SCH_H_TOTAL_ASSETS_EOY'] >= 1_000_000_000, 'PRT_READINESS_SCORE'] += 10
     
     # Not using substitute mortality = potential opportunity
+    # MORTALITY_CODE is a string column; compare against string '3'
     if 'MORTALITY_CODE' in df.columns:
-        df.loc[df['MORTALITY_CODE'] != 3, 'PRT_READINESS_SCORE'] += 20
+        df.loc[df['MORTALITY_CODE'].astype(str) != '3', 'PRT_READINESS_SCORE'] += 20
     
     # Add INDUSTRY_SECTOR if BUSINESS_CODE exists
     if 'BUSINESS_CODE' in df.columns:
@@ -161,7 +162,7 @@ if __name__ == "__main__":
         print(f"Loaded {len(db_plans)} DB plans from {year}")
         
         # Load Schedule H
-        from normalize_sch_h_fields import load_and_normalize_sch_h
+        from data_ingestion.normalize_sch_h_fields import load_and_normalize_sch_h
         sch_h_path = f"../data_raw/F_SCH_H_{year}_latest.csv"
         sch_h = load_and_normalize_sch_h(sch_h_path, year=year)
         

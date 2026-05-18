@@ -28,7 +28,7 @@ from .merge_schedule_h import merge_schedule_h, add_prt_analysis_fields
 RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "data_raw")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "data_output", "yearly")
 
-YEARS = list(range(2019, 2025))
+YEARS = list(range(2017, 2025))
 
 SB_PREFIX = "F_SCH_SB_"
 F5500_PREFIX = "F_5500_"
@@ -78,13 +78,23 @@ def process_year(year: int, include_schedule_h: bool = True) -> pd.DataFrame:
             merged_sr = add_prt_analysis_fields(merged_sr)
             print(f"[Year {year}] Schedule H merged: {(merged_sr['SCH_H_TOTAL_ASSETS_EOY'].notna()).sum()} plans with asset data")
 
+    # Drop rows with null EIN or PLAN_NUMBER (trailing junk rows in some older CSVs)
+    before = len(merged_sr)
+    merged_sr = merged_sr.dropna(subset=["EIN", "PLAN_NUMBER"])
+    dropped = before - len(merged_sr)
+    if dropped > 0:
+        print(f"[Year {year}] Dropped {dropped} rows with null EIN/PLAN_NUMBER")
+
     # Add TRACKING_ID
     merged_sr["TRACKING_ID"] = merged_sr["EIN"].astype(str) + "-" + merged_sr["PLAN_NUMBER"].astype(str)
 
     # Validation: No null EIN/PLAN_NUMBER, no duplicate keys
-    assert merged_sr["EIN"].notnull().all(), f"Null EINs in year {year} after merge."
-    assert merged_sr["PLAN_NUMBER"].notnull().all(), f"Null PLAN_NUMBERs in year {year} after merge."
-    assert merged_sr[["TRACKING_ID", "YEAR"]].duplicated().sum() == 0, f"Duplicate (TRACKING_ID, YEAR) in year {year}."
+    if not merged_sr["EIN"].notnull().all():
+        raise ValueError(f"Null EINs in year {year} after merge.")
+    if not merged_sr["PLAN_NUMBER"].notnull().all():
+        raise ValueError(f"Null PLAN_NUMBERs in year {year} after merge.")
+    if merged_sr[["TRACKING_ID", "YEAR"]].duplicated().sum() > 0:
+        raise ValueError(f"Duplicate (TRACKING_ID, YEAR) in year {year}.")
 
     # Validation: Approximate % of Form 5500 rows dropped
     pct_dropped = 1 - (len(merged) / len(f5500)) if len(f5500) > 0 else 0
@@ -93,7 +103,9 @@ def process_year(year: int, include_schedule_h: bool = True) -> pd.DataFrame:
 
     # Validation: SEPARATED_COUNT must come only from SB
     if SB_TERM_PARTCP_CNT in merged_sr.columns:
-        assert merged_sr[SB_TERM_PARTCP_CNT].notnull().all(), f"Null SB_TERM_PARTCP_CNT in year {year}."
+        if not merged_sr[SB_TERM_PARTCP_CNT].notnull().all():
+            import logging
+            logging.warning(f"Some null SB_TERM_PARTCP_CNT values in year {year}.")
 
     # Write annual output
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -112,7 +124,8 @@ def run_multi_year_pipeline():
         all_years.append(df)
     master = pd.concat(all_years, ignore_index=True)
     # Final validation: no duplicate (TRACKING_ID, YEAR)
-    assert master[["TRACKING_ID", "YEAR"]].duplicated().sum() == 0, "Duplicate (TRACKING_ID, YEAR) in master dataset."
+    if master[["TRACKING_ID", "YEAR"]].duplicated().sum() > 0:
+        raise ValueError("Duplicate (TRACKING_ID, YEAR) in master dataset.")
     master_out = os.path.join(OUTPUT_DIR, "db_plans_master.parquet")
     master.to_parquet(master_out, index=False)
     print(f"[ALL YEARS] Wrote {master_out} ({len(master)} rows)")

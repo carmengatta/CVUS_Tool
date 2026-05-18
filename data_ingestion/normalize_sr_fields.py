@@ -8,16 +8,6 @@ import logging
 # Canonical header mapping for Schedule R (add more as needed)
 SR_HEADER_MAP = {
     'SCH_R_EIN': 'EIN',
-# Documentation for the new normalization process
-"""
-Form 5500 Data Ingestion: Normalize Schedule R Fields
-
-Responsibilities:
-- Normalize Schedule R fields only
-- Standardize keys (EIN, PLAN_NUMBER, ACK_ID)
-- No assumptions about plan existence
-- No filtering based on plan type
-"""
     'SCH_R_PLAN_NUM': 'PLAN_NUMBER',
     'SCH_R_PLAN_YR': 'PLAN_YEAR',
     'SCH_R_ACK_ID': 'ACK_ID',

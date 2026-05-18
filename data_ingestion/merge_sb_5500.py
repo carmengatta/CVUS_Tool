@@ -111,11 +111,17 @@ def merge_sb_5500(df_sb: pd.DataFrame, df_5500: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ----------------------------
-    # Cleanup: remove interest / rate columns
+    # Cleanup: remove interest / rate columns (preserve SB segment rates)
     # ----------------------------
+    PRESERVE_RATE_COLS = {
+        "SB_FIRST_SEG_RATE", "SB_SECOND_SEG_RATE", "SB_THIRD_SEG_RATE",
+        "SB_EFF_INT_RATE", "SB_AT_INTEREST_RATE",
+        "FIRST_SEG_RATE", "SECOND_SEG_RATE", "THIRD_SEG_RATE",
+        "EFF_INT_RATE", "AT_INTEREST_RATE",
+    }
     interest_cols = [
         c for c in merged.columns
-        if "INTEREST" in c or "RATE" in c or "DISCOUNT" in c
+        if ("INTEREST" in c or "RATE" in c or "DISCOUNT" in c) and c not in PRESERVE_RATE_COLS
     ]
     merged = merged.drop(columns=interest_cols, errors="ignore")
 

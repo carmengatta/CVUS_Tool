@@ -137,7 +137,7 @@ def combine_years(
             df_5500['SB_KEY'] = df_5500['EIN'] + '-' + df_5500['PLAN_NUMBER'] + '-' + df_5500['PLAN_YEAR'].astype(str)
             df_5500 = df_5500[df_5500['SB_KEY'].isin(df_sb['SB_KEY'])]
         else:
-            df_5500 = pd.DataFrame(columns=df_sb.columns)
+            df_5500 = pd.DataFrame()
 
         # Load and filter SR
         df_sr = load_sr(sr_path) if load_sr and os.path.exists(sr_path) else None
@@ -148,7 +148,7 @@ def combine_years(
             df_sr['SB_KEY'] = df_sr['EIN'] + '-' + df_sr['PLAN_NUMBER'] + '-' + df_sr['PLAN_YEAR'].astype(str)
             df_sr = df_sr[df_sr['SB_KEY'].isin(df_sb['SB_KEY'])]
         else:
-            df_sr = pd.DataFrame(columns=df_sb.columns)
+            df_sr = pd.DataFrame()
 
         # Use SB as base, left-merge 5500 and SR onto SB
         merged = df_sb.copy()

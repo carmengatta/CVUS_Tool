@@ -51,6 +51,9 @@ def parse_participant_count(val, row_idx=None):
 
 
 def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame:
+    # Work on a copy to avoid mutating the input DataFrame
+    df = df.copy()
+
     # Canonical header normalization for Schedule SB (no PLAN_NUMBER)
     FIELD_MAP = {
         'EIN': ['SB_EIN', 'SPONS_DFE_EIN', 'SCH_R_EIN', 'EIN'],
@@ -65,11 +68,22 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
         'TERM_LIABILITY': ['SB_TERM_FNDNG_TGT_AMT', 'TERM_LIABILITY'],
         'TOTAL_LIABILITY': ['SB_TOT_FNDNG_TGT_AMT', 'TOTAL_LIABILITY'],
         'MORTALITY_CODE': ['SB_MORTALITY_TBL_CD', 'MORTALITY_CODE'],
+        # Segment rates (key actuarial fields)
+        'FIRST_SEG_RATE': ['SB_FIRST_SEG_RATE', 'FIRST_SEG_RATE'],
+        'SECOND_SEG_RATE': ['SB_SECOND_SEG_RATE', 'SECOND_SEG_RATE'],
+        'THIRD_SEG_RATE': ['SB_THIRD_SEG_RATE', 'THIRD_SEG_RATE'],
+        'EFF_INT_RATE': ['SB_EFF_INT_RATE', 'EFF_INT_RATE'],
         # Actuary info fields
         'ACTUARY_FIRM_NAME': ['SB_ACTUARY_FIRM_NAME', 'ACTUARY_FIRM_NAME'],
         'ACTUARY_NAME': ['SB_ACTUARY_NAME_LINE', 'ACTUARY_NAME'],
         'ACTUARY_CITY': ['SB_ACTUARY_US_CITY', 'ACTUARY_CITY'],
         'ACTUARY_STATE': ['SB_ACTUARY_US_STATE', 'ACTUARY_STATE'],
+        'ACTUARY_ENROLLMENT_NUM': ['SB_ACTRY_ENRLMT_NUM', 'ACTUARY_ENROLLMENT_NUM'],
+        'ACTUARY_PHONE': ['SB_ACTUARY_PHONE_NUM', 'ACTUARY_PHONE'],
+        # Change indicators from Schedule SB
+        'CHG_ACTUARIAL_ASSUMP_IND': ['SB_CHG_ACTRL_ASSUMP_CURR_IND', 'CHG_ACTUARIAL_ASSUMP_IND'],
+        'CHG_METHOD_IND': ['SB_CHG_METHOD_IND', 'CHG_METHOD_IND'],
+        'ACTUARY_NOT_REFLECT_IND': ['SB_ACTUARY_NOT_REFLECT_IND', 'ACTUARY_NOT_REFLECT_IND'],
     }
 
     # Rename columns using canonical mapping (first match)
@@ -108,10 +122,6 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     else:
         out['PLAN_YEAR'] = get_col(FIELD_MAP['PLAN_YEAR'], 'int')
 
-    # ACK_ID: synthesize if missing
-    if 'ACK_ID' not in df.columns and all(x in df.columns for x in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR']):
-        df['ACK_ID'] = df['EIN'].astype(str).str.strip() + '-' + df['PLAN_NUMBER'].astype(str).str.strip().str.zfill(3) + '-' + str(plan_year if plan_year is not None else '')
-
     # PARTICIPANT COUNTS
     out['ACTIVE_COUNT'] = get_col(FIELD_MAP['ACTIVE_COUNT'], 'int')
     out['RETIREE_COUNT'] = get_col(FIELD_MAP['RETIREE_COUNT'], 'int')
@@ -119,9 +129,6 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     sep_col = get_col(FIELD_MAP['SEPARATED_COUNT'], 'int')
     out['SEPARATED_COUNT'] = sep_col.fillna(0)
 
-    # Guarantee column exists
-    if 'SEPARATED_COUNT' not in out.columns:
-        out['SEPARATED_COUNT'] = 0
     # TOTAL_PARTICIPANTS: fallback logic
     total_part = get_col(FIELD_MAP['TOTAL_PARTICIPANTS'], 'int')
     if total_part.isnull().all():
@@ -136,13 +143,32 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     out['TOTAL_LIABILITY'] = get_col(FIELD_MAP['TOTAL_LIABILITY'], 'float')
 
     # MORTALITY_CODE
+    # In 2018, the IRS introduced new mortality tables. Schedule SB used 6 codes:
+    #   1-3 = old tables (prescribed combined / separate / substitute)
+    #   4-6 = new tables (prescribed combined / separate / substitute)
+    # Normalize 4→1, 5→2, 6→3 so all years use a consistent 1/2/3 scheme.
     out['MORTALITY_CODE'] = get_col(FIELD_MAP['MORTALITY_CODE'], 'str')
+    out['MORTALITY_CODE'] = out['MORTALITY_CODE'].replace({'4': '1', '5': '2', '6': '3'})
+
+    # SEGMENT RATES & EFFECTIVE INTEREST RATE
+    out['FIRST_SEG_RATE'] = get_col(FIELD_MAP['FIRST_SEG_RATE'], 'float')
+    out['SECOND_SEG_RATE'] = get_col(FIELD_MAP['SECOND_SEG_RATE'], 'float')
+    out['THIRD_SEG_RATE'] = get_col(FIELD_MAP['THIRD_SEG_RATE'], 'float')
+    out['EFF_INT_RATE'] = get_col(FIELD_MAP['EFF_INT_RATE'], 'float')
 
     # ACTUARY INFO
     out['ACTUARY_FIRM_NAME'] = get_col(FIELD_MAP['ACTUARY_FIRM_NAME'], 'str')
     out['ACTUARY_NAME'] = get_col(FIELD_MAP['ACTUARY_NAME'], 'str')
     out['ACTUARY_CITY'] = get_col(FIELD_MAP['ACTUARY_CITY'], 'str')
     out['ACTUARY_STATE'] = get_col(FIELD_MAP['ACTUARY_STATE'], 'str')
+    out['ACTUARY_ENROLLMENT_NUM'] = get_col(FIELD_MAP['ACTUARY_ENROLLMENT_NUM'], 'str')
+    out['ACTUARY_PHONE'] = get_col(FIELD_MAP['ACTUARY_PHONE'], 'str')
+
+    # CHANGE INDICATORS (from Schedule SB filing)
+    # These indicate changes reported in the current filing
+    out['CHG_ACTUARIAL_ASSUMP_IND'] = get_col(FIELD_MAP['CHG_ACTUARIAL_ASSUMP_IND'], 'str')
+    out['CHG_METHOD_IND'] = get_col(FIELD_MAP['CHG_METHOD_IND'], 'str')
+    out['ACTUARY_NOT_REFLECT_IND'] = get_col(FIELD_MAP['ACTUARY_NOT_REFLECT_IND'], 'str')
 
     # ACK_ID: copy from source if present, or synthesize
     if 'ACK_ID' in df.columns:
@@ -155,12 +181,17 @@ def normalize_sb_fields(df: pd.DataFrame, plan_year: int = None) -> pd.DataFrame
     # Ensure all required columns exist (fallback to None)
     for col in ['EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT', 'TOTAL_PARTICIPANTS',
                 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
-                'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE', 'ACK_ID']:
+                'FIRST_SEG_RATE', 'SECOND_SEG_RATE', 'THIRD_SEG_RATE', 'EFF_INT_RATE',
+                'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE', 'ACTUARY_ENROLLMENT_NUM',
+                'ACTUARY_PHONE', 'CHG_ACTUARIAL_ASSUMP_IND', 'CHG_METHOD_IND', 'ACTUARY_NOT_REFLECT_IND', 'ACK_ID']:
         if col not in out.columns:
             out[col] = None
 
     # Output only the normalized schema columns, in order
     schema = ['ACK_ID', 'EIN', 'PLAN_NUMBER', 'PLAN_YEAR', 'ACTIVE_COUNT', 'RETIREE_COUNT', 'SEPARATED_COUNT',
               'TOTAL_PARTICIPANTS', 'ACT_LIABILITY', 'RET_LIABILITY', 'TERM_LIABILITY', 'TOTAL_LIABILITY', 'MORTALITY_CODE',
-              'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE']
+              'FIRST_SEG_RATE', 'SECOND_SEG_RATE', 'THIRD_SEG_RATE', 'EFF_INT_RATE',
+              'ACTUARY_FIRM_NAME', 'ACTUARY_NAME', 'ACTUARY_CITY', 'ACTUARY_STATE',
+              'ACTUARY_ENROLLMENT_NUM', 'ACTUARY_PHONE',
+              'CHG_ACTUARIAL_ASSUMP_IND', 'CHG_METHOD_IND', 'ACTUARY_NOT_REFLECT_IND']
     return out[schema]

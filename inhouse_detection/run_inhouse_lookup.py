@@ -41,7 +41,7 @@ sponsor_df = pd.read_parquet(SPONSOR_PATH)
 
 # Filter and sort sponsors with >10,000 retirees
 large_sponsors = (
-    sponsor_df[sponsor_df["retired"] > 10000]
+    sponsor_df[sponsor_df["RETIREE_COUNT"] > 10000]
     .sort_values("retired", ascending=False)
     .reset_index(drop=True)
 )
@@ -52,7 +52,7 @@ large_sponsors = large_sponsors.head(5)
 print("==========================================================")
 print(" IN-HOUSE ACTUARY DETECTION — TEST RUN (Top 5 Sponsors)  ")
 print("==========================================================")
-print(large_sponsors[["ein", "sponsor_name", "retired"]])
+print(large_sponsors[["EIN", "SPONSOR_DFE_NAME", "RETIREE_COUNT"]])
 print("\n")
 
 
@@ -64,12 +64,12 @@ if os.path.exists(OUTPUT_PATH):
     print(f"Loaded lookup cache with {len(cache)} rows.\n")
 else:
     cache = pd.DataFrame(columns=[
-        "ein", "sponsor_name", "retired",
+        "EIN", "SPONSOR_DFE_NAME", "RETIREE_COUNT",
         "query", "result_title", "result_link", "result_snippet",
         "possible_inhouse", "timestamp"
     ])
 
-already_processed = set(cache["ein"].astype(str))
+already_processed = set(cache["EIN"].astype(str))
 
 
 # ------------------------------------------------------------
@@ -78,9 +78,9 @@ already_processed = set(cache["ein"].astype(str))
 new_rows = []
 
 for _, row in large_sponsors.iterrows():
-    ein = str(row["ein"])
-    sponsor = row["sponsor_name"]
-    retired = int(row["retired"])
+    ein = str(row["EIN"])
+    sponsor = row["SPONSOR_DFE_NAME"]
+    retired = int(row["RETIREE_COUNT"])
 
     if ein in already_processed:
         print(f"Skipping {sponsor} (EIN {ein}) — already processed.\n")
@@ -111,9 +111,9 @@ for _, row in large_sponsors.iterrows():
         flag = detect_actuary_keywords(snippet)
 
         new_rows.append({
-            "ein": ein,
-            "sponsor_name": sponsor,
-            "retired": retired,
+            "EIN": ein,
+            "SPONSOR_DFE_NAME": sponsor,
+            "RETIREE_COUNT": retired,
             "query": query,
             "result_title": h.get("title"),
             "result_link": h.get("link"),

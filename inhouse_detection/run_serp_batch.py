@@ -92,17 +92,17 @@ def run_batch_search():
     df = pd.read_parquet(ROLLUP_PATH)
 
     # Column validation
-    if "sponsor_dfe_name" not in df.columns:
-        raise ValueError(f"sponsor_dfe_name missing. Actual columns: {df.columns}")
+    if "SPONSOR_DFE_NAME" not in df.columns:
+        raise ValueError(f"SPONSOR_DFE_NAME missing. Actual columns: {df.columns}")
 
-    if "retired" not in df.columns:
-        raise ValueError("Column 'retired' missing from dataset.")
+    if "RETIREE_COUNT" not in df.columns:
+        raise ValueError("Column 'RETIREE_COUNT' missing from dataset.")
 
     # Filter >10,000 annuitants
-    df_large = df[df["retired"] > 10000].copy()
+    df_large = df[df["RETIREE_COUNT"] > 10000].copy()
 
     # Sort descending (biggest plans at top)
-    df_sorted = df_large.sort_values("retired", ascending=False)
+    df_sorted = df_large.sort_values("RETIREE_COUNT", ascending=False)
 
     # TOP 5 + BOTTOM 5
     top5 = df_sorted.head(5)
@@ -111,15 +111,15 @@ def run_batch_search():
     batch = pd.concat([top5, bottom5])
 
     print("\n=== Running SERP Lookup for These 10 Sponsors ===")
-    print(batch[["sponsor_dfe_name", "ein", "retired"]])
+    print(batch[["SPONSOR_DFE_NAME", "EIN", "RETIREE_COUNT"]])
 
     results_output = []
 
     for _, row in batch.iterrows():
 
-        sponsor = row["sponsor_dfe_name"]
-        ein = row["ein"]
-        retired = row["retired"]
+        sponsor = row["SPONSOR_DFE_NAME"]
+        ein = row["EIN"]
+        retired = row["RETIREE_COUNT"]
 
         print(f"\n🔍 Searching for: {sponsor} (EIN {ein}, Retired {retired:,})")
 

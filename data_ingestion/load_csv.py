@@ -233,8 +233,18 @@ def load_5500_csv(
             except Exception:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Remove interest / discount rate columns
-    interest_cols = [c for c in df.columns if "INTEREST" in c or "RATE" in c or "DISCOUNT" in c]
+    # Remove interest / discount rate columns from Form 5500 only.
+    # Preserve SB segment rates and effective interest rates (key actuarial fields).
+    PRESERVE_RATE_COLS = {
+        "SB_FIRST_SEG_RATE", "SB_SECOND_SEG_RATE", "SB_THIRD_SEG_RATE",
+        "SB_EFF_INT_RATE", "SB_AT_INTEREST_RATE",
+        "FIRST_SEG_RATE", "SECOND_SEG_RATE", "THIRD_SEG_RATE",
+        "EFF_INT_RATE", "AT_INTEREST_RATE",
+    }
+    interest_cols = [
+        c for c in df.columns
+        if ("INTEREST" in c or "RATE" in c or "DISCOUNT" in c) and c not in PRESERVE_RATE_COLS
+    ]
     df = df.drop(columns=interest_cols, errors="ignore")
 
     return df
